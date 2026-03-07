@@ -232,7 +232,7 @@ int main(int argc, char* argv[])
                     printf("Artist: %s\n", result.metadata.artist.c_str());
                     printf("Album: %s\n", result.metadata.album.c_str());
                     printf("Genre: %s\n", result.metadata.genre.c_str());
-                    printf("Year: %s\n", result.metadata.year.c_str());
+                    printf("Year: %s\n", result.metadata.date.c_str());
                 }
             } else {
                 FILE* outFile = fopen(gb::outputFile.string().c_str(), "w");
@@ -247,7 +247,7 @@ int main(int argc, char* argv[])
                     fprintf(outFile, "Artist: %s\n", result.metadata.artist.c_str());
                     fprintf(outFile, "Album: %s\n", result.metadata.album.c_str());
                     fprintf(outFile, "Genre: %s\n", result.metadata.genre.c_str());
-                    fprintf(outFile, "Year: %s\n", result.metadata.year.c_str());
+                    fprintf(outFile, "Year: %s\n", result.metadata.date.c_str());
                 }
                 fclose(outFile);
                 yay("Metadata written to output file successfully.");
