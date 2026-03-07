@@ -19,6 +19,658 @@ namespace gb = globals;
 #include <future>
 #include <thread>
 #include <atomic>
+#include <string>
+
+extern "C" {
+#include <libavformat/avformat.h>
+#include <libavcodec/avcodec.h>
+#include <libavutil/opt.h>
+#include <libavutil/channel_layout.h>
+#include <libavutil/samplefmt.h>
+#include <libavutil/audio_fifo.h>
+#include <libswresample/swresample.h>
+}
+
+namespace {
+    std::string AvErrorToString(int errorCode)
+    {
+        char errorBuffer[AV_ERROR_MAX_STRING_SIZE] = {0};
+        av_strerror(errorCode, errorBuffer, sizeof(errorBuffer));
+        return std::string(errorBuffer);
+    }
+
+    const AVCodec* FindPreferredEncoder(Operations::AudioFormat format)
+    {
+        switch (format)
+        {
+            case Operations::AudioFormat::MP3:
+                if (const AVCodec* codec = avcodec_find_encoder_by_name("libmp3lame")) {
+                    return codec;
+                }
+                return avcodec_find_encoder(AV_CODEC_ID_MP3);
+            case Operations::AudioFormat::AAC:
+            case Operations::AudioFormat::M4A:
+                return avcodec_find_encoder(AV_CODEC_ID_AAC);
+            case Operations::AudioFormat::OPUS:
+                if (const AVCodec* codec = avcodec_find_encoder_by_name("libopus")) {
+                    return codec;
+                }
+                return avcodec_find_encoder(AV_CODEC_ID_OPUS);
+            default:
+                return nullptr;
+        }
+    }
+
+    const char* ContainerForFormat(Operations::AudioFormat format)
+    {
+        switch (format)
+        {
+            case Operations::AudioFormat::MP3: return "mp3";
+            case Operations::AudioFormat::AAC: return "adts";
+            case Operations::AudioFormat::M4A: return "ipod";
+            case Operations::AudioFormat::OPUS: return "ogg";
+            default: return nullptr;
+        }
+    }
+
+    int PickSampleRate(const AVCodec* encoder, int preferred)
+    {
+        if (!encoder || !encoder->supported_samplerates) {
+            return preferred > 0 ? preferred : 44100;
+        }
+
+        int best = encoder->supported_samplerates[0];
+        int bestDistance = std::abs(best - preferred);
+        for (const int* p = encoder->supported_samplerates; *p; ++p)
+        {
+            int distance = std::abs(*p - preferred);
+            if (distance < bestDistance)
+            {
+                best = *p;
+                bestDistance = distance;
+            }
+        }
+        return best;
+    }
+
+    AVSampleFormat PickSampleFormat(const AVCodec* encoder)
+    {
+        if (!encoder || !encoder->sample_fmts) {
+            return AV_SAMPLE_FMT_FLTP;
+        }
+        return encoder->sample_fmts[0];
+    }
+
+    bool ConvertWithLibAv(const fs::path& inputPath, const fs::path& outputFile, Operations::AudioFormat format)
+    {
+        AVFormatContext* inputFormat = nullptr;
+        AVFormatContext* outputFormat = nullptr;
+        AVCodecContext* decoderContext = nullptr;
+        AVCodecContext* encoderContext = nullptr;
+        SwrContext* resampler = nullptr;
+        AVAudioFifo* audioFifo = nullptr;
+        AVPacket* packet = nullptr;
+        AVFrame* decodedFrame = nullptr;
+        int audioStreamIndex = -1;
+        int status = 0;
+        int64_t nextPts = 0;
+
+        auto cleanup = [&]() {
+            if (packet) av_packet_free(&packet);
+            if (decodedFrame) av_frame_free(&decodedFrame);
+            if (audioFifo) av_audio_fifo_free(audioFifo);
+            if (resampler) swr_free(&resampler);
+            if (decoderContext) avcodec_free_context(&decoderContext);
+            if (encoderContext) avcodec_free_context(&encoderContext);
+            if (outputFormat)
+            {
+                if (!(outputFormat->oformat->flags & AVFMT_NOFILE) && outputFormat->pb) {
+                    avio_closep(&outputFormat->pb);
+                }
+                avformat_free_context(outputFormat);
+            }
+            if (inputFormat) avformat_close_input(&inputFormat);
+        };
+
+        status = avformat_open_input(&inputFormat, inputPath.string().c_str(), nullptr, nullptr);
+        if (status < 0)
+        {
+            err(("libav: failed to open input: " + AvErrorToString(status)).c_str());
+            cleanup();
+            return false;
+        }
+
+        status = avformat_find_stream_info(inputFormat, nullptr);
+        if (status < 0)
+        {
+            err(("libav: failed to read stream info: " + AvErrorToString(status)).c_str());
+            cleanup();
+            return false;
+        }
+
+        status = av_find_best_stream(inputFormat, AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
+        if (status < 0)
+        {
+            err("libav: no audio stream found in input file.");
+            cleanup();
+            return false;
+        }
+        audioStreamIndex = status;
+
+        AVStream* inputStream = inputFormat->streams[audioStreamIndex];
+        const AVCodec* decoder = avcodec_find_decoder(inputStream->codecpar->codec_id);
+        if (!decoder)
+        {
+            err("libav: no decoder available for input codec.");
+            cleanup();
+            return false;
+        }
+
+        decoderContext = avcodec_alloc_context3(decoder);
+        if (!decoderContext)
+        {
+            err("libav: failed to allocate decoder context.");
+            cleanup();
+            return false;
+        }
+
+        status = avcodec_parameters_to_context(decoderContext, inputStream->codecpar);
+        if (status < 0)
+        {
+            err(("libav: failed to copy decoder parameters: " + AvErrorToString(status)).c_str());
+            cleanup();
+            return false;
+        }
+
+        status = avcodec_open2(decoderContext, decoder, nullptr);
+        if (status < 0)
+        {
+            err(("libav: failed to open decoder: " + AvErrorToString(status)).c_str());
+            cleanup();
+            return false;
+        }
+
+        const AVCodec* encoder = FindPreferredEncoder(format);
+        const char* container = ContainerForFormat(format);
+        if (!encoder || !container)
+        {
+            err("libav: unsupported output format for libav conversion.");
+            cleanup();
+            return false;
+        }
+
+        status = avformat_alloc_output_context2(&outputFormat, nullptr, container, outputFile.string().c_str());
+        if (status < 0 || !outputFormat)
+        {
+            err(("libav: failed to allocate output format: " + AvErrorToString(status)).c_str());
+            cleanup();
+            return false;
+        }
+
+        AVStream* outputStream = avformat_new_stream(outputFormat, nullptr);
+        if (!outputStream)
+        {
+            err("libav: failed to create output stream.");
+            cleanup();
+            return false;
+        }
+
+        encoderContext = avcodec_alloc_context3(encoder);
+        if (!encoderContext)
+        {
+            err("libav: failed to allocate encoder context.");
+            cleanup();
+            return false;
+        }
+
+        if (decoderContext->ch_layout.nb_channels <= 0)
+        {
+            av_channel_layout_default(&decoderContext->ch_layout, 2);
+        }
+
+        encoderContext->sample_rate = PickSampleRate(encoder, decoderContext->sample_rate > 0 ? decoderContext->sample_rate : 44100);
+        status = av_channel_layout_copy(&encoderContext->ch_layout, &decoderContext->ch_layout);
+        if (status < 0)
+        {
+            err(("libav: failed to copy channel layout: " + AvErrorToString(status)).c_str());
+            cleanup();
+            return false;
+        }
+        encoderContext->sample_fmt = PickSampleFormat(encoder);
+        encoderContext->bit_rate = 192000;
+        encoderContext->time_base = AVRational{1, encoderContext->sample_rate};
+
+        if (outputFormat->oformat->flags & AVFMT_GLOBALHEADER) {
+            encoderContext->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+        }
+
+        status = avcodec_open2(encoderContext, encoder, nullptr);
+        if (status < 0)
+        {
+            err(("libav: failed to open encoder: " + AvErrorToString(status)).c_str());
+            cleanup();
+            return false;
+        }
+
+        status = avcodec_parameters_from_context(outputStream->codecpar, encoderContext);
+        if (status < 0)
+        {
+            err(("libav: failed to set output stream parameters: " + AvErrorToString(status)).c_str());
+            cleanup();
+            return false;
+        }
+        outputStream->time_base = encoderContext->time_base;
+
+        if (!(outputFormat->oformat->flags & AVFMT_NOFILE))
+        {
+            status = avio_open(&outputFormat->pb, outputFile.string().c_str(), AVIO_FLAG_WRITE);
+            if (status < 0)
+            {
+                err(("libav: failed to open output file: " + AvErrorToString(status)).c_str());
+                cleanup();
+                return false;
+            }
+        }
+
+        status = avformat_write_header(outputFormat, nullptr);
+        if (status < 0)
+        {
+            err(("libav: failed to write output header: " + AvErrorToString(status)).c_str());
+            cleanup();
+            return false;
+        }
+
+        status = swr_alloc_set_opts2(
+            &resampler,
+            &encoderContext->ch_layout,
+            encoderContext->sample_fmt,
+            encoderContext->sample_rate,
+            &decoderContext->ch_layout,
+            decoderContext->sample_fmt,
+            decoderContext->sample_rate,
+            0,
+            nullptr
+        );
+        if (status < 0 || !resampler || swr_init(resampler) < 0)
+        {
+            err("libav: failed to initialize audio resampler.");
+            cleanup();
+            return false;
+        }
+
+        packet = av_packet_alloc();
+        decodedFrame = av_frame_alloc();
+        if (!packet || !decodedFrame)
+        {
+            err("libav: failed to allocate frame/packet structures.");
+            cleanup();
+            return false;
+        }
+
+        audioFifo = av_audio_fifo_alloc(
+            encoderContext->sample_fmt,
+            encoderContext->ch_layout.nb_channels,
+            1
+        );
+        if (!audioFifo)
+        {
+            err("libav: failed to allocate audio FIFO.");
+            cleanup();
+            return false;
+        }
+
+        auto encodeConvertedFrame = [&](AVFrame* frame) -> bool {
+            int sendStatus = avcodec_send_frame(encoderContext, frame);
+            if (sendStatus < 0)
+            {
+                err(("libav: failed sending frame to encoder: " + AvErrorToString(sendStatus)).c_str());
+                return false;
+            }
+
+            while (true)
+            {
+                AVPacket* outPacket = av_packet_alloc();
+                if (!outPacket)
+                {
+                    err("libav: failed to allocate output packet.");
+                    return false;
+                }
+
+                int recvStatus = avcodec_receive_packet(encoderContext, outPacket);
+                if (recvStatus == AVERROR(EAGAIN) || recvStatus == AVERROR_EOF)
+                {
+                    av_packet_free(&outPacket);
+                    break;
+                }
+                if (recvStatus < 0)
+                {
+                    err(("libav: failed receiving packet from encoder: " + AvErrorToString(recvStatus)).c_str());
+                    av_packet_free(&outPacket);
+                    return false;
+                }
+
+                av_packet_rescale_ts(outPacket, encoderContext->time_base, outputStream->time_base);
+                outPacket->stream_index = outputStream->index;
+
+                int writeStatus = av_interleaved_write_frame(outputFormat, outPacket);
+                av_packet_free(&outPacket);
+                if (writeStatus < 0)
+                {
+                    err(("libav: failed writing encoded packet: " + AvErrorToString(writeStatus)).c_str());
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        auto encodeFromFifo = [&](int requestedSamples, bool padWithSilence) -> bool {
+            if (requestedSamples <= 0) {
+                return true;
+            }
+
+            AVFrame* frame = av_frame_alloc();
+            if (!frame)
+            {
+                err("libav: failed to allocate encoder input frame.");
+                return false;
+            }
+
+            frame->format = encoderContext->sample_fmt;
+            frame->sample_rate = encoderContext->sample_rate;
+            frame->nb_samples = requestedSamples;
+            if (av_channel_layout_copy(&frame->ch_layout, &encoderContext->ch_layout) < 0)
+            {
+                err("libav: failed to copy encoder channel layout to frame.");
+                av_frame_free(&frame);
+                return false;
+            }
+
+            int frameStatus = av_frame_get_buffer(frame, 0);
+            if (frameStatus < 0)
+            {
+                err(("libav: failed to allocate encoder frame buffer: " + AvErrorToString(frameStatus)).c_str());
+                av_frame_free(&frame);
+                return false;
+            }
+
+            int availableSamples = av_audio_fifo_size(audioFifo);
+            int toRead = std::min(requestedSamples, availableSamples);
+            if (toRead > 0)
+            {
+                int readSamples = av_audio_fifo_read(audioFifo, reinterpret_cast<void**>(frame->data), toRead);
+                if (readSamples < toRead)
+                {
+                    err("libav: failed reading expected samples from FIFO.");
+                    av_frame_free(&frame);
+                    return false;
+                }
+            }
+
+            if (toRead < requestedSamples)
+            {
+                if (!padWithSilence)
+                {
+                    av_frame_free(&frame);
+                    return true;
+                }
+                av_samples_set_silence(
+                    frame->data,
+                    toRead,
+                    requestedSamples - toRead,
+                    encoderContext->ch_layout.nb_channels,
+                    encoderContext->sample_fmt
+                );
+            }
+
+            frame->pts = nextPts;
+            nextPts += requestedSamples;
+
+            bool encoded = encodeConvertedFrame(frame);
+            av_frame_free(&frame);
+            return encoded;
+        };
+
+        auto pushConvertedToFifo = [&](const AVFrame* inFrame) -> bool {
+            const int inputSamples = (inFrame != nullptr) ? inFrame->nb_samples : 0;
+            int maxOutSamples = av_rescale_rnd(
+                swr_get_delay(resampler, decoderContext->sample_rate) + inputSamples,
+                encoderContext->sample_rate,
+                decoderContext->sample_rate,
+                AV_ROUND_UP
+            );
+
+            if (maxOutSamples <= 0) {
+                return true;
+            }
+
+            uint8_t** convertedData = nullptr;
+            int convertedLineSize = 0;
+
+            int allocStatus = av_samples_alloc_array_and_samples(
+                &convertedData,
+                &convertedLineSize,
+                encoderContext->ch_layout.nb_channels,
+                maxOutSamples,
+                encoderContext->sample_fmt,
+                0
+            );
+            if (allocStatus < 0)
+            {
+                err(("libav: failed to allocate conversion buffers: " + AvErrorToString(allocStatus)).c_str());
+                return false;
+            }
+
+            int convertedSamples = swr_convert(
+                resampler,
+                convertedData,
+                maxOutSamples,
+                inFrame != nullptr ? const_cast<const uint8_t**>(inFrame->extended_data) : nullptr,
+                inputSamples
+            );
+
+            if (convertedSamples < 0)
+            {
+                av_freep(&convertedData[0]);
+                av_freep(&convertedData);
+                err("libav: sample format conversion failed.");
+                return false;
+            }
+
+            if (av_audio_fifo_realloc(audioFifo, av_audio_fifo_size(audioFifo) + convertedSamples) < 0)
+            {
+                av_freep(&convertedData[0]);
+                av_freep(&convertedData);
+                err("libav: failed to grow audio FIFO.");
+                return false;
+            }
+
+            int wrote = av_audio_fifo_write(audioFifo, reinterpret_cast<void**>(convertedData), convertedSamples);
+            av_freep(&convertedData[0]);
+            av_freep(&convertedData);
+            if (wrote < convertedSamples)
+            {
+                err("libav: failed to write all converted samples to FIFO.");
+                return false;
+            }
+
+            return true;
+        };
+
+        while (av_read_frame(inputFormat, packet) >= 0)
+        {
+            if (packet->stream_index != audioStreamIndex)
+            {
+                av_packet_unref(packet);
+                continue;
+            }
+
+            status = avcodec_send_packet(decoderContext, packet);
+            av_packet_unref(packet);
+            if (status < 0)
+            {
+                err(("libav: failed sending packet to decoder: " + AvErrorToString(status)).c_str());
+                cleanup();
+                return false;
+            }
+
+            while (true)
+            {
+                status = avcodec_receive_frame(decoderContext, decodedFrame);
+                if (status == AVERROR(EAGAIN) || status == AVERROR_EOF) {
+                    break;
+                }
+                if (status < 0)
+                {
+                    err(("libav: failed receiving frame from decoder: " + AvErrorToString(status)).c_str());
+                    cleanup();
+                    return false;
+                }
+
+                if (!pushConvertedToFifo(decodedFrame))
+                {
+                    cleanup();
+                    return false;
+                }
+
+                av_frame_unref(decodedFrame);
+
+                const int encoderFrameSize = encoderContext->frame_size > 0
+                    ? encoderContext->frame_size
+                    : av_audio_fifo_size(audioFifo);
+
+                while (encoderFrameSize > 0 && av_audio_fifo_size(audioFifo) >= encoderFrameSize)
+                {
+                    if (!encodeFromFifo(encoderFrameSize, false))
+                    {
+                        cleanup();
+                        return false;
+                    }
+                }
+
+                if (encoderContext->frame_size == 0 && av_audio_fifo_size(audioFifo) > 0)
+                {
+                    if (!encodeFromFifo(av_audio_fifo_size(audioFifo), false))
+                    {
+                        cleanup();
+                        return false;
+                    }
+                }
+            }
+        }
+
+        avcodec_send_packet(decoderContext, nullptr);
+        while (avcodec_receive_frame(decoderContext, decodedFrame) >= 0)
+        {
+            if (!pushConvertedToFifo(decodedFrame))
+            {
+                cleanup();
+                return false;
+            }
+            av_frame_unref(decodedFrame);
+
+            const int encoderFrameSize = encoderContext->frame_size > 0
+                ? encoderContext->frame_size
+                : av_audio_fifo_size(audioFifo);
+
+            while (encoderFrameSize > 0 && av_audio_fifo_size(audioFifo) >= encoderFrameSize)
+            {
+                if (!encodeFromFifo(encoderFrameSize, false))
+                {
+                    cleanup();
+                    return false;
+                }
+            }
+
+            if (encoderContext->frame_size == 0 && av_audio_fifo_size(audioFifo) > 0)
+            {
+                if (!encodeFromFifo(av_audio_fifo_size(audioFifo), false))
+                {
+                    cleanup();
+                    return false;
+                }
+            }
+        }
+
+        while (true)
+        {
+            int delayedSamples = swr_get_delay(resampler, decoderContext->sample_rate);
+            if (delayedSamples <= 0)
+            {
+                break;
+            }
+
+            int fifoBeforeDrain = av_audio_fifo_size(audioFifo);
+            if (!pushConvertedToFifo(nullptr))
+            {
+                cleanup();
+                return false;
+            }
+            int fifoAfterDrain = av_audio_fifo_size(audioFifo);
+            if (fifoAfterDrain <= fifoBeforeDrain)
+            {
+                break;
+            }
+
+            if (encoderContext->frame_size > 0)
+            {
+                while (av_audio_fifo_size(audioFifo) >= encoderContext->frame_size)
+                {
+                    if (!encodeFromFifo(encoderContext->frame_size, false))
+                    {
+                        cleanup();
+                        return false;
+                    }
+                }
+            }
+            else if (av_audio_fifo_size(audioFifo) > 0)
+            {
+                if (!encodeFromFifo(av_audio_fifo_size(audioFifo), false))
+                {
+                    cleanup();
+                    return false;
+                }
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        if (encoderContext->frame_size > 0 && av_audio_fifo_size(audioFifo) > 0)
+        {
+            if (!encodeFromFifo(encoderContext->frame_size, true))
+            {
+                cleanup();
+                return false;
+            }
+        }
+        else if (encoderContext->frame_size == 0 && av_audio_fifo_size(audioFifo) > 0)
+        {
+            if (!encodeFromFifo(av_audio_fifo_size(audioFifo), false))
+            {
+                cleanup();
+                return false;
+            }
+        }
+
+        if (!encodeConvertedFrame(nullptr))
+        {
+            cleanup();
+            return false;
+        }
+
+        status = av_write_trailer(outputFormat);
+        if (status < 0)
+        {
+            err(("libav: failed writing output trailer: " + AvErrorToString(status)).c_str());
+            cleanup();
+            return false;
+        }
+
+        cleanup();
+        return true;
+    }
+}
 
 
 namespace Operations
@@ -63,70 +715,82 @@ namespace Operations
             outputFile = outputPath / (inputPath.stem().string() + OutputExtensionForFormat(format));
         }
 
-        int outputFormat = 0;
-        switch (format)
+        const bool useLibsndfilePath = (format == AudioFormat::WAV || format == AudioFormat::FLAC || format == AudioFormat::OGG);
+
+        if (useLibsndfilePath)
         {
-            case AudioFormat::WAV:
-                outputFormat = SF_FORMAT_WAV | SF_FORMAT_PCM_16;
-                break;
-            case AudioFormat::FLAC:
-                outputFormat = SF_FORMAT_FLAC | SF_FORMAT_PCM_16;
-                break;
-            case AudioFormat::OGG:
-                outputFormat = SF_FORMAT_OGG | SF_FORMAT_VORBIS;
-                break;
-            default:
-                err("Library-only conversion currently supports WAV, FLAC, and OGG output.");
-                warn("For other formats, add a libavcodec-based transcoder path.");
-                return;
-        }
-
-        SF_INFO inInfo{};
-        SNDFILE* inFile = sf_open(inputPath.string().c_str(), SFM_READ, &inInfo);
-        if (!inFile)
-        {
-            err("Failed to open input audio file for conversion.");
-            return;
-        }
-
-        SF_INFO outInfo{};
-        outInfo.samplerate = inInfo.samplerate;
-        outInfo.channels = inInfo.channels;
-        outInfo.format = outputFormat;
-
-        if (!sf_format_check(&outInfo))
-        {
-            err("Output format is not supported by the current libsndfile build.");
-            sf_close(inFile);
-            return;
-        }
-
-        SNDFILE* outFile = sf_open(outputFile.string().c_str(), SFM_WRITE, &outInfo);
-        if (!outFile)
-        {
-            err("Failed to create output audio file for conversion.");
-            sf_close(inFile);
-            return;
-        }
-
-        constexpr sf_count_t frameBlockSize = 4096;
-        std::vector<float> pcmBuffer(static_cast<std::size_t>(frameBlockSize * inInfo.channels));
-
-        sf_count_t framesRead = 0;
-        while ((framesRead = sf_readf_float(inFile, pcmBuffer.data(), frameBlockSize)) > 0)
-        {
-            sf_count_t framesWritten = sf_writef_float(outFile, pcmBuffer.data(), framesRead);
-            if (framesWritten != framesRead)
+            int outputFormat = 0;
+            switch (format)
             {
-                err("Audio conversion write failed before all frames were written.");
+                case AudioFormat::WAV:
+                    outputFormat = SF_FORMAT_WAV | SF_FORMAT_PCM_16;
+                    break;
+                case AudioFormat::FLAC:
+                    outputFormat = SF_FORMAT_FLAC | SF_FORMAT_PCM_16;
+                    break;
+                case AudioFormat::OGG:
+                    outputFormat = SF_FORMAT_OGG | SF_FORMAT_VORBIS;
+                    break;
+                default:
+                    err("Unsupported libsndfile output format.");
+                    return;
+            }
+
+            SF_INFO inInfo{};
+            SNDFILE* inFile = sf_open(inputPath.string().c_str(), SFM_READ, &inInfo);
+            if (!inFile)
+            {
+                err("Failed to open input audio file for conversion.");
+                return;
+            }
+
+            SF_INFO outInfo{};
+            outInfo.samplerate = inInfo.samplerate;
+            outInfo.channels = inInfo.channels;
+            outInfo.format = outputFormat;
+
+            if (!sf_format_check(&outInfo))
+            {
+                err("Output format is not supported by the current libsndfile build.");
                 sf_close(inFile);
-                sf_close(outFile);
+                return;
+            }
+
+            SNDFILE* outFile = sf_open(outputFile.string().c_str(), SFM_WRITE, &outInfo);
+            if (!outFile)
+            {
+                err("Failed to create output audio file for conversion.");
+                sf_close(inFile);
+                return;
+            }
+
+            constexpr sf_count_t frameBlockSize = 4096;
+            std::vector<float> pcmBuffer(static_cast<std::size_t>(frameBlockSize * inInfo.channels));
+
+            sf_count_t framesRead = 0;
+            while ((framesRead = sf_readf_float(inFile, pcmBuffer.data(), frameBlockSize)) > 0)
+            {
+                sf_count_t framesWritten = sf_writef_float(outFile, pcmBuffer.data(), framesRead);
+                if (framesWritten != framesRead)
+                {
+                    err("Audio conversion write failed before all frames were written.");
+                    sf_close(inFile);
+                    sf_close(outFile);
+                    return;
+                }
+            }
+
+            sf_close(inFile);
+            sf_close(outFile);
+        }
+        else
+        {
+            if (!ConvertWithLibAv(inputPath, outputFile, format))
+            {
+                err("Library-based conversion failed for requested output format.");
                 return;
             }
         }
-
-        sf_close(inFile);
-        sf_close(outFile);
 
         if (InputHasAttachedCover(inputPath) && !FormatSupportsAttachedCover(format))
         {
@@ -150,11 +814,6 @@ namespace Operations
             outTagRef.tag()->setYear(inTagRef.tag()->year());
             outTagRef.tag()->setTrack(inTagRef.tag()->track());
             outTagRef.file()->save();
-        }
-
-        if (format != AudioFormat::WAV && format != AudioFormat::FLAC && format != AudioFormat::OGG)
-        {
-            return;
         }
 
         yay("Conversion completed successfully!");
