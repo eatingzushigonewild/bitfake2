@@ -2,6 +2,7 @@
 Bitfake was originally created to detect fake `.FLAC` files through spectral analysis. It has since grown into a multipurpose CLI tool for handling music more easily and efficiently.
 
 One common problem was that getting a track’s metadata required long `ffprobe` commands with messy output. Converting music with `ffmpeg` was also repetitive. The command itself is easy to remember, but writing scripts to convert entire directories felt inefficient and slow. This project now performs metadata and conversion tasks directly through linked libraries (TagLib/libsndfile/libav*).
+
 <p align="center">
   <img src="bitfakethelogotrust.png" width="400">
 </p>
@@ -11,6 +12,7 @@ One common problem was that getting a track’s metadata required long `ffprobe`
 1.7 another minor update. Adds some text to the spectrogram.
 <p align="center">
   <img src="samplesg.png" width="500">
+  <img src="bitfakethelogotrust.png" width="500">
 </p>
 
 ## Implemented Features
@@ -83,6 +85,12 @@ sudo emerge --ask sys-devel/gcc sys-devel/make media-libs/taglib sci-libs/fftw m
 Gentoo USE flag note (for encoder support):
 ```sh
 echo "media-video/ffmpeg encode mp3 opus vorbis" | sudo tee -a /etc/portage/package.use/bitfake
+```
+WAITTTTT!! Do you have the GURU enabled? You can download it straight from there instead!! :D
+```sh
+sudo emaint sync -a # Sync all repos just to be safe!
+sudo emerge --ask app-misc/bitfake2
+``` 
 ```
 WAITTTTT!! Do you have the GURU enabled? You can download it straight from there instead!! :D
 ```sh
