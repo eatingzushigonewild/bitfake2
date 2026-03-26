@@ -112,7 +112,7 @@ Users that are using npins:
 ```sh
 npins add github Ray17x bitfake2 --branch main
 ```
-Then in your packages module:
+Then add to your system packages:
 ```nix
 let
   sources = import ../npins/default.nix;
@@ -130,7 +130,7 @@ add this to your flake.nix
 ```nix
 inputs.bitfake2.url = "github:Ray17x/bitfake2";
 ```
-then add to your system packages:
+Then add to your system packages:
 ```nix
 environment.systemPackages = [ inputs.bitfake2.packages.${pkgs.system}.default ];
 ```
