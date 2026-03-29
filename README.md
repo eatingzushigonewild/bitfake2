@@ -1,7 +1,7 @@
 # Bitfake
 Bitfake was originally created to detect fake `.FLAC` files through spectral analysis. It has since grown into a multipurpose CLI tool for handling music more easily and efficiently.
 
-One common problem was that getting a track’s metadata required long `ffprobe` commands with messy output. Converting music with `ffmpeg` was also repetitive. The command itself is easy to remember, but writing scripts to convert entire directories felt inefficient and slow. This project now performs metadata and conversion tasks directly through linked libraries (TagLib/libsndfile/libav*).
+One common problem was that getting a track's metadata required long `ffprobe` commands with messy output. Converting music with `ffmpeg` was also repetitive. The command itself is easy to remember, but writing scripts to convert entire directories felt inefficient and slow. This project now performs metadata and conversion tasks directly through linked libraries (TagLib/libsndfile/libav*).
 
 <p align="center">
   <img src="bitfakethelogotrust.png" width="400">
@@ -21,7 +21,7 @@ One common problem was that getting a track’s metadata required long `ffprobe`
 * Calculating ReplayGain and applying it to files (Works for track replay gain iterating through directories, album replay gain is a bit funky?)
 * Directory Conversion (works for all previously mentioned formats!)
 * CoverArt+ (Brings along cover art among all conversions!)
-* Organzing Files by album! (Give a dir of random music, and bitfake will organize it - ty to uncognic)
+* Organizing Files by album! (Give a dir of random music, and bitfake will organize it - ty to uncognic)
 * Directory Tagging (YAY!)
 * Spectrogram generation (in .png)
 * Version info (WOW! BEST YET!)
@@ -86,27 +86,18 @@ Gentoo USE flag note (for encoder support):
 ```sh
 echo "media-video/ffmpeg encode mp3 opus vorbis" | sudo tee -a /etc/portage/package.use/bitfake
 ```
+
 WAITTTTT!! Do you have the GURU enabled? You can download it straight from there instead!! :D
 ```sh
 sudo emaint sync -a # Sync all repos just to be safe!
 sudo emerge --ask app-misc/bitfake2
-``` 
 ```
-WAITTTTT!! Do you have the GURU enabled? You can download it straight from there instead!! :D
-```sh
-sudo emaint sync -a # Sync all repos just to be safe!
-sudo emerge --ask app-misc/bitfake2
-``` 
 
 Alpine:
 ```sh
 sudo apk add --no-cache build-base taglib-dev fftw-dev ebur128-dev libsndfile-dev ffmpeg-dev
 ```
 
-Overall dependency list (for other distros):
-```
-build-base taglib-dev fftw-dev ebur128-dev libsndfile-dev libavformat libavcodec libavutil libswresample
-```
 NixOS:
 
 Users that are using npins:
@@ -126,8 +117,7 @@ in {
 > [!NOTE]
 > This might differ to other people's npins configuration but mostly should be the same.
 
-Users that are using flakes:
-add this to your flake.nix
+Users that are using flakes, add this to your flake.nix:
 ```nix
 inputs.bitfake2.url = "github:Ray17x/bitfake2";
 ```
@@ -138,71 +128,73 @@ environment.systemPackages = [ inputs.bitfake2.packages.${pkgs.system}.default ]
 
 FreeBSD:
 
-Clone the bitfake2 repo
+Clone the bitfake2 repo:
 ```sh
 git clone https://github.com/Ray17x/bitfake2
 ```
+
 > [!WARNING]
-> `ebur128` conflicts with `libebur128`.
-
-
+> `ebur128` conflicts with `libebur128`, make sure to install `libebur128`.
 ```sh
 sudo pkg install taglib fftw3 libebur128 libsndfile ffmpeg
 ```
 Once you have installed the deps:
 ```sh
 make -f BSD.make
+sudo make -f BSD.make install
+```
+
+DragonFly BSD:
+
+Clone the bitfake2 repo:
+```sh
+git clone https://github.com/Ray17x/bitfake2
 ```
 ```sh
+sudo pkg install taglib fftw3 libebur128 libsndfile ffmpeg
+```
+```sh
+make -f BSD.make
 sudo make -f BSD.make install
 ```
 
 NetBSD:
 
-Clone the bitfake2 repo
+Clone the bitfake2 repo:
 ```sh
 git clone https://github.com/Ray17x/bitfake2
 ```
 
-To install the dependency's needed for bitfake2
+Install the dependencies:
 ```sh
-pkgin install taglib fftw libebur128 libsndfile ffmpeg7
+pkgin install taglib fftw3 libebur128 libsndfile ffmpeg7
 ```
-Once you have the dependency's for bitfake2, now compile.
+Compile and install:
 ```sh
 make -f BSD.make
-```
-To install
-```
 make -f BSD.make install
 ```
+
 OpenBSD:
 
-Clone the bitfake2 repo.
-```
+Clone the bitfake2 repo:
+```sh
 git clone https://github.com/Ray17x/bitfake2
 ```
 
-To install the dependency's needed for bitfake2
+Install the dependencies:
 ```sh
 pkg_add taglib fftw3 libebur128 libsndfile ffmpeg
 ```
-
-Once you have the dependency's for bitfake2, now compile.
+Compile and install:
 ```sh
 make -f BSD.make
-```
-To install
-```
 make -f BSD.make install
 ```
 
-To install the dependency's needed for bitfake2
-```
 2. Clone the project and compile
 
 Using `git clone`:
-
 ```sh
 git clone --depth 1 https://github.com/Ray17x/bitfake2.git
 cd bitfake2
@@ -210,7 +202,6 @@ make
 ```
 
 3. Running
-
 ```sh
 ./bitf -h
 ```
@@ -246,8 +237,8 @@ Run spectral analysis:
 Note: For some commands, `-i` can also be a directory path, and Bitfake will process supported audio files inside it.
 
 4. Cleaning up project
-You can clean the project and prepare for a fresh build with:
 
+You can clean the project and prepare for a fresh build with:
 ```sh
 make clean
 ```
@@ -257,13 +248,11 @@ make clean
 This project uses `clang-format` with the repository config in `.clang-format` (same-line/K&R braces).
 
 Format all C++ source/header files:
-
 ```sh
 make format
 ```
 
 Check formatting without modifying files (useful for CI):
-
 ```sh
 make check-format
 ```
@@ -271,7 +260,6 @@ make check-format
 You are now ready to build the project again with any additions or contributions you make.
 
 This project is not yet released in any distribution package manager as a raw binary. If you want to run the binary as a command, copy it to your `/usr/bin` directory like this (NOT RECOMMENDED):
-
 ```sh
 sudo cp ./bitf /usr/bin/
 ```
@@ -279,7 +267,7 @@ sudo cp ./bitf /usr/bin/
 ## Troubleshooting
 
 Linker errors like `cannot find -lavformat`, `cannot find -lavcodec`, `cannot find -lavutil`, or `cannot find -lswresample`:
-* Install FFmpeg development packages for your distro (`ffmpeg-devel`, `ffmpeg-dev`, or `libav* -dev` packages).
+* Install FFmpeg development packages for your distro (`ffmpeg-devel`, `ffmpeg-dev`, or `libav*-dev` packages).
 
 Linker errors like `cannot find -ltag`, `cannot find -lfftw3`, `cannot find -lebur128`, or `cannot find -lsndfile`:
 * Install the TagLib/FFTW3/libebur128/libsndfile *development* packages for your distro (not just the runtime libs).
