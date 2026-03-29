@@ -1,4 +1,4 @@
-CXX      ?= c++
+CXX= clang++
 CXXFLAGS += -std=c++17 -Wall -Wextra -I./Utilities -I/usr/local/include -Wno-deprecated-declarations
 LDFLAGS  += -L/usr/local/lib -ltag -lfftw3 -lebur128 -lsndfile -lavformat -lavcodec -lswresample -lavutil -pthread
 
