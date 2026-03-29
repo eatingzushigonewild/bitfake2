@@ -1841,7 +1841,7 @@ void GenerateSpectrogram(const fs::path &inputPath, const fs::path &outputImageP
     }
 
     std::vector<double> fftIn(FFT_SIZE, 0.0);
-    std::vector<std::complex<double>> fftOut(static_cast<std::size_t>(numBins));
+    fftw_complex* fftOut = fftw_alloc_complex(static_cast<std::size_t>(numBins));
     fftw_plan plan = fftw_plan_dft_r2c_1d(FFT_SIZE, fftIn.data(), fftOut.data(), FFTW_ESTIMATE);
     if (!plan) {
         err("Failed to allocate FFT plan for spectrogram generation.");
@@ -1898,6 +1898,7 @@ void GenerateSpectrogram(const fs::path &inputPath, const fs::path &outputImageP
     }
 
     fftw_destroy_plan(plan);
+    fftw_free(fftOut); 
 
     const int xGridTicks = 10;
     for (int i = 0; i <= xGridTicks; ++i) {
