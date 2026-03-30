@@ -1837,7 +1837,8 @@ void GenerateSpectrogram(const fs::path &inputPath, const fs::path &outputImageP
 
     std::vector<double> hannWindow(FFT_SIZE);
     for (int i = 0; i < FFT_SIZE; ++i) {
-        hannWindow[i] = 0.5 * (1.0 - std::cos((2.0 * M_PI * i) / (FFT_SIZE - 1)));
+        constexpr double PI = 3.14159265358979323846;
+        hannWindow[i] = 0.5 * (1.0 - std::cos((2.0 * PI * i) / (FFT_SIZE - 1)));
     }
 
     std::vector<double> fftIn(FFT_SIZE, 0.0);
