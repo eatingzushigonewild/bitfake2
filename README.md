@@ -140,7 +140,7 @@ sudo pkg install taglib fftw3 libebur128 libsndfile ffmpeg
 ```
 Once you have installed the deps:
 ```sh
-make -f BSD.make
+make -f BSDmakefile
 sudo make -f BSDmakefile install
 ```
 
@@ -156,7 +156,7 @@ git clone https://github.com/Ray17x/bitfake2
 sudo pkg install taglib fftw3 libebur128 libsndfile ffmpeg
 ```
 ```sh
-make -f BSD.make
+make -f BSDmakefile
 sudo make -f BSDmakefile install
 ```
 
