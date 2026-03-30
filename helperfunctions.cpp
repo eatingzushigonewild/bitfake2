@@ -227,8 +227,8 @@ std::vector<ReplayGainResult> GetReplayGainList(const fs::path &path) {
 SpectralAnalysisResult SpectralAnalysis(const fs::path &path) {
     SpectralAnalysisResult tmpresult;
     std::vector<float> samples;
-    const int BUFFER_SIZE = 4096;
-    const int FFT_SIZE = 4096;
+    constexpr int BUFFER_SIZE = 4096;
+    constexpr int FFT_SIZE = 4096;
 
     float buffer[BUFFER_SIZE];
     sf_count_t bytesRead;
@@ -321,7 +321,8 @@ SpectralAnalysisResult SpectralAnalysis(const fs::path &path) {
         }
 
         for (int i = 0; i < FFT_SIZE; i++) {
-            float window = 0.5f * (1.0f - cos(2.0f * M_PI * i / (FFT_SIZE - 1)));
+            constexpr float PI = 3.14159265358979323846f;
+            float window = 0.5f * (1.0f - cos(2.0f * PI * i / (FFT_SIZE - 1)));
             in[i] = samples[chunk * FFT_SIZE + i] * window;
         }
 
