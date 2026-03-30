@@ -18,6 +18,6 @@ jobs:
           prepare: |
             pkg_add taglib fftw3 libebur128 libsndfile ffmpeg
           run: |
-            make -f BSD.make
+            make -f BSDmakefile
             ./bitf -v
             ./bitf -h
