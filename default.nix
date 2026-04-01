@@ -1,5 +1,16 @@
-let
+{sprinkles ? (import ./npins).sprinkles, ...} @ overrides:
+(import sprinkles).new {
+  inherit overrides;
   sources = import ./npins;
-  pkgs = import sources.nixpkgs { };
-in
-pkgs.callPackage ./package.nix { }
+  inputs = {nixpkgs}: {pkgs = import nixpkgs {};};
+  outputs = {
+    outputs,
+    pkgs,
+  }: {
+    packages.default = (pkgs.callPackage ./package.nix {}).overrideAttrs {src = ./.;};
+    shells.default = pkgs.mkShell {
+      inputsFrom = [(pkgs.callPackage ./package.nix {}).overrideAttrs {src = ./.;}];
+      packages = [pkgs.clang-tools];
+    };
+  };
+}
