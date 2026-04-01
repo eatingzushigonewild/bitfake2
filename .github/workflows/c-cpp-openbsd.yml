@@ -16,7 +16,7 @@ jobs:
         with:
           usesh: true
           prepare: |
-            pkg_add taglib fftw3 libebur128 libsndfile ffmpeg
+            pkg_add taglib fftw3 libebur128 libsndfile ffmpeg curl
           run: |
             make -f BSDmakefile
             ./bitf -v

@@ -17,7 +17,7 @@ jobs:
           release: "14.4"
           usesh: true
           prepare: |
-            pkg install -y taglib fftw3 libebur128 libsndfile ffmpeg
+            pkg install -y taglib fftw3 libebur128 libsndfile ffmpeg curl
           run: |
             make -f BSDmakefile install
             bitf -v
