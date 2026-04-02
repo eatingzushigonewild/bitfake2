@@ -46,6 +46,7 @@ enum class AudioFormat {
     VOX,
     WV,
     WEBM,
+    WAVPACK,
     SVX8,
     CDA,
     GENERAL
