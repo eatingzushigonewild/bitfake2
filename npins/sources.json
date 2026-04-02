@@ -5,18 +5,6 @@
       "name": "nixpkgs-unstable",
       "url": "https://releases.nixos.org/nixpkgs/nixpkgs-26.05pre973302.106eb93cbb9d/nixexprs.tar.xz",
       "hash": "sha256-YXwjgR1eZAhHYU/7p2hzod3VRsHwlOiekgPp0aJJULI="
-    },
-    "sprinkles": {
-      "type": "Git",
-      "repository": {
-        "type": "Forgejo",
-        "server": "https://codeberg.org/",
-        "owner": "poacher",
-        "repo": "sprinkles"
-      },
-      "branch": "main",
-      "submodules": false,
-      "revision": "6fd1ae90adeff00e8b6229ac4db8a03d5b0a42c5"
     }
   },
   "version": 7
