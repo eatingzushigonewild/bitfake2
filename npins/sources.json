@@ -3,8 +3,8 @@
     "nixpkgs": {
       "type": "Channel",
       "name": "nixpkgs-unstable",
-      "url": "https://releases.nixos.org/nixpkgs/nixpkgs-26.05pre971056.b63fe7f000ad/nixexprs.tar.xz",
-      "hash": "sha256-5QVei2IIfVO3GqMkiiXlrZtaniOkXyMWnqbTVkItrco="
+      "url": "https://releases.nixos.org/nixpkgs/nixpkgs-26.05pre973302.106eb93cbb9d/nixexprs.tar.xz",
+      "hash": "sha256-YXwjgR1eZAhHYU/7p2hzod3VRsHwlOiekgPp0aJJULI="
     },
     "sprinkles": {
       "type": "Git",
@@ -16,9 +16,7 @@
       },
       "branch": "main",
       "submodules": false,
-      "revision": "6fd1ae90adeff00e8b6229ac4db8a03d5b0a42c5",
-      "url": "https://codeberg.org/poacher/sprinkles/archive/6fd1ae90adeff00e8b6229ac4db8a03d5b0a42c5.tar.gz",
-      "hash": "0r88703g8lhs5dmlxwzqz1f28cc1jrh57hacni8g4l1xpzkwj162"
+      "revision": "6fd1ae90adeff00e8b6229ac4db8a03d5b0a42c5"
     }
   },
   "version": 7
