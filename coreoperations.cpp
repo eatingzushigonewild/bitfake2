@@ -1032,7 +1032,7 @@ bool ConvertWithLibAv(const fs::path &inputPath, const fs::path &outputFile, bit
 } // namespace
 
 namespace bitfake::nonuser {
-    bool ConvertToFileType(const fs::path &inputPath, const fs::path &outputPath, bitfake::type::AudioFormat format,
+bool ConvertToFileType(const fs::path &inputPath, const fs::path &outputPath, bitfake::type::AudioFormat format,
                        bitfake::type::VBRQualities quality) {
     if (!fs::exists(inputPath)) {
         err("Input path does not exist.");
@@ -1095,7 +1095,8 @@ namespace bitfake::nonuser {
     }
 
     const bool useLibsndfilePath =
-        (format == bitfake::type::AudioFormat::WAV || format == bitfake::type::AudioFormat::FLAC || format == bitfake::type::AudioFormat::OGG);
+        (format == bitfake::type::AudioFormat::WAV || format == bitfake::type::AudioFormat::FLAC ||
+         format == bitfake::type::AudioFormat::OGG);
 
     if (useLibsndfilePath) {
         int outputFormat = 0;
@@ -1188,10 +1189,11 @@ namespace bitfake::nonuser {
     yay(outputFile.c_str());
     return true;
 }
-}
+} // namespace bitfake::nonuser
 
 namespace bitfake::replaygain {
-void ApplyReplayGain(const fs::path &path, bitfake::type::ReplayGainByTrack trackGainInfo, bitfake::type::ReplayGainByAlbum albumGainInfo) {
+void ApplyReplayGain(const fs::path &path, bitfake::type::ReplayGainByTrack trackGainInfo,
+                     bitfake::type::ReplayGainByAlbum albumGainInfo) {
     bool trackInfoEmpty = (trackGainInfo.trackGain == 0.0f && trackGainInfo.trackPeak == 0.0f);
     bool albumInfoEmpty = (albumGainInfo.albumGain == 0.0f && albumGainInfo.albumPeak == 0.0f);
 
@@ -1212,8 +1214,10 @@ void ApplyReplayGain(const fs::path &path, bitfake::type::ReplayGainByTrack trac
         const std::string trackArtist = existingMetadata.artist.empty() ? "<unknown artist>" : existingMetadata.artist;
         printf("--- %s - %s\nAlbum Gain / Peak: %.2f dB / %.6f\n\n", trackTitle.c_str(), trackArtist.c_str(),
                albumGainInfo.albumGain, albumGainInfo.albumPeak);
-        bitfake::tagging::StageMetaDataChanges(properties, "REPLAYGAIN_ALBUM_GAIN", std::to_string(albumGainInfo.albumGain) + " dB");
-        bitfake::tagging::StageMetaDataChanges(properties, "REPLAYGAIN_ALBUM_PEAK", std::to_string(albumGainInfo.albumPeak));
+        bitfake::tagging::StageMetaDataChanges(properties, "REPLAYGAIN_ALBUM_GAIN",
+                                               std::to_string(albumGainInfo.albumGain) + " dB");
+        bitfake::tagging::StageMetaDataChanges(properties, "REPLAYGAIN_ALBUM_PEAK",
+                                               std::to_string(albumGainInfo.albumPeak));
         bitfake::tagging::CommitMetaDataChanges(path, properties);
         return;
     }
@@ -1222,8 +1226,10 @@ void ApplyReplayGain(const fs::path &path, bitfake::type::ReplayGainByTrack trac
         const std::string trackArtist = existingMetadata.artist.empty() ? "<unknown artist>" : existingMetadata.artist;
         printf("--- %s - %s\nTrack Gain / Peak: %.2f dB / %.6f\n\n", trackTitle.c_str(), trackArtist.c_str(),
                trackGainInfo.trackGain, trackGainInfo.trackPeak);
-        bitfake::tagging::StageMetaDataChanges(properties, "REPLAYGAIN_TRACK_GAIN", std::to_string(trackGainInfo.trackGain) + " dB");
-        bitfake::tagging::StageMetaDataChanges(properties, "REPLAYGAIN_TRACK_PEAK", std::to_string(trackGainInfo.trackPeak));
+        bitfake::tagging::StageMetaDataChanges(properties, "REPLAYGAIN_TRACK_GAIN",
+                                               std::to_string(trackGainInfo.trackGain) + " dB");
+        bitfake::tagging::StageMetaDataChanges(properties, "REPLAYGAIN_TRACK_PEAK",
+                                               std::to_string(trackGainInfo.trackPeak));
         bitfake::tagging::CommitMetaDataChanges(path, properties);
         return;
     }
@@ -1234,10 +1240,14 @@ void ApplyReplayGain(const fs::path &path, bitfake::type::ReplayGainByTrack trac
     printf("--- %s - %s\nTrack Gain / Peak: %.2f dB / %.6f\nAlbum Gain / Peak: %.2f dB / %.6f\n\n", trackTitle.c_str(),
            trackArtist.c_str(), trackGainInfo.trackGain, trackGainInfo.trackPeak, albumGainInfo.albumGain,
            albumGainInfo.albumPeak);
-    bitfake::tagging::StageMetaDataChanges(properties, "REPLAYGAIN_TRACK_GAIN", std::to_string(trackGainInfo.trackGain) + " dB");
-    bitfake::tagging::StageMetaDataChanges(properties, "REPLAYGAIN_TRACK_PEAK", std::to_string(trackGainInfo.trackPeak));
-    bitfake::tagging::StageMetaDataChanges(properties, "REPLAYGAIN_ALBUM_GAIN", std::to_string(albumGainInfo.albumGain) + " dB");
-    bitfake::tagging::StageMetaDataChanges(properties, "REPLAYGAIN_ALBUM_PEAK", std::to_string(albumGainInfo.albumPeak));
+    bitfake::tagging::StageMetaDataChanges(properties, "REPLAYGAIN_TRACK_GAIN",
+                                           std::to_string(trackGainInfo.trackGain) + " dB");
+    bitfake::tagging::StageMetaDataChanges(properties, "REPLAYGAIN_TRACK_PEAK",
+                                           std::to_string(trackGainInfo.trackPeak));
+    bitfake::tagging::StageMetaDataChanges(properties, "REPLAYGAIN_ALBUM_GAIN",
+                                           std::to_string(albumGainInfo.albumGain) + " dB");
+    bitfake::tagging::StageMetaDataChanges(properties, "REPLAYGAIN_ALBUM_PEAK",
+                                           std::to_string(albumGainInfo.albumPeak));
     bitfake::tagging::CommitMetaDataChanges(path, properties);
 }
 
@@ -1358,7 +1368,8 @@ void CalculateReplayGainAlbum(const fs::path &path) {
     const unsigned int hardwareThreads = std::thread::hardware_concurrency();
     const std::size_t desiredWorkers = std::max<std::size_t>(1, static_cast<std::size_t>(hardwareThreads / 2));
     const std::size_t workerCount = std::min<std::size_t>(desiredWorkers, allTracks.size());
-    std::vector<bitfake::type::ReplayGainByTrack> trackResults(allTracks.size(), bitfake::type::ReplayGainByTrack{0.0f, 0.0f});
+    std::vector<bitfake::type::ReplayGainByTrack> trackResults(allTracks.size(),
+                                                               bitfake::type::ReplayGainByTrack{0.0f, 0.0f});
     std::atomic<std::size_t> nextIndex{0};
     std::vector<std::future<void>> workers;
     workers.reserve(workerCount);
@@ -1400,8 +1411,8 @@ void CalculateReplayGainAlbum(const fs::path &path) {
         }
 
         if (trackCount > 0) {
-            albumReplayGain[album] =
-                bitfake::type::ReplayGainByAlbum{static_cast<float>(totalGain / trackCount), static_cast<float>(maxPeak)};
+            albumReplayGain[album] = bitfake::type::ReplayGainByAlbum{static_cast<float>(totalGain / trackCount),
+                                                                      static_cast<float>(maxPeak)};
 
             const std::string albumName = album.empty() ? "<unknown album>" : album;
             plog(("Album replaygain calculated: " + albumName + " | tracks=" + std::to_string(trackCount) +
@@ -1424,7 +1435,7 @@ void CalculateReplayGainAlbum(const fs::path &path) {
     }
 }
 
-}
+} // namespace bitfake::replaygain
 
 namespace bitfake::sort {
 
@@ -2248,12 +2259,10 @@ void RenameFilesFromTags(const fs::path &rootDir) {
     }
 }
 
-
-
-}
+} // namespace bitfake::sort
 
 namespace bitfake::spectral {
-    void GenerateSpectrogram(const fs::path &inputPath, const fs::path &outputImagePath) {
+void GenerateSpectrogram(const fs::path &inputPath, const fs::path &outputImagePath) {
     if (!fs::exists(inputPath) || !fs::is_regular_file(inputPath) || !fc::IsValidAudioFile(inputPath)) {
         err("Input path does not exist or is not a regular file.");
         return;
@@ -2505,4 +2514,4 @@ namespace bitfake::spectral {
     yay(("Spectrogram image created at: " + outputPath.string()).c_str());
     // dude what the fuck is this spectrogram code i am so sorry for this abomination of a function
 }
-}
+} // namespace bitfake::spectral
