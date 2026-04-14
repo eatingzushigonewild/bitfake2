@@ -1411,6 +1411,139 @@ bool ConvertToFileType(const fs::path &inputPath, const fs::path &outputPath, bi
 
     return convertSingleFile(inputPath, outputPath);
 }
+bool ParallelConvertToFileType(const std::vector<fs::path> &inputPaths, const fs::path &outputDir, type::AudioFormat format,
+                           type::VBRQualities quality)
+    {
+        if (inputPaths.empty()) {
+            warn("No input files provided for parallel conversion.");
+            return false;
+        }
+
+        if (outputDir.empty()) {
+            err("Output directory is empty.");
+            return false;
+        }
+
+        std::error_code ec;
+        if (fs::exists(outputDir, ec)) {
+            if (ec) {
+                err(("Failed to inspect output directory: " + outputDir.string() + " (" + ec.message() + ")").c_str());
+                return false;
+            }
+            if (!fs::is_directory(outputDir, ec) || ec) {
+                err("Output path exists and is not a directory.");
+                return false;
+            }
+        } else {
+            fs::create_directories(outputDir, ec);
+            if (ec) {
+                err(("Failed to create output directory: " + outputDir.string() + " (" + ec.message() + ")").c_str());
+                return false;
+            }
+        }
+
+        struct ConvertJob {
+            fs::path inputPath;
+            fs::path outputPath;
+        };
+
+        std::vector<ConvertJob> jobs;
+        jobs.reserve(inputPaths.size());
+
+        std::size_t skippedCount = 0;
+        std::unordered_map<std::string, std::size_t> plannedOutputs;
+        const std::string outputExtension = bitfake::coverart::OutputExtensionForFormat(format);
+
+        for (const fs::path &inputPath : inputPaths) {
+            if (!fs::exists(inputPath)) {
+                warn(("Skipping missing input path: " + inputPath.string()).c_str());
+                ++skippedCount;
+                continue;
+            }
+
+            if (!fs::is_regular_file(inputPath)) {
+                warn(("Skipping non-regular input path: " + inputPath.string()).c_str());
+                ++skippedCount;
+                continue;
+            }
+
+            if (!fc::IsValidAudioFile(inputPath)) {
+                warn(("Skipping non-audio input file: " + inputPath.string()).c_str());
+                ++skippedCount;
+                continue;
+            }
+
+            fs::path outputPath = outputDir / (inputPath.stem().string() + outputExtension);
+            std::string outputKey = fs::absolute(outputPath).lexically_normal().string();
+            if (++plannedOutputs[outputKey] > 1) {
+                warn(("Skipping duplicate output target from parallel job list: " + outputPath.string()).c_str());
+                ++skippedCount;
+                continue;
+            }
+
+            jobs.push_back({inputPath, outputPath});
+        }
+
+        if (jobs.empty()) {
+            warn("No valid audio files available for parallel conversion.");
+            return false;
+        }
+
+        std::atomic<std::size_t> nextIndex{0};
+        std::atomic<std::size_t> convertedCount{0};
+        std::atomic<std::size_t> failedCount{0};
+
+        const unsigned int hardwareThreads = std::thread::hardware_concurrency();
+        const std::size_t detectedThreads =
+            hardwareThreads > 0 ? static_cast<std::size_t>(hardwareThreads) : static_cast<std::size_t>(1);
+        const std::size_t desiredWorkers = std::max<std::size_t>(1, detectedThreads / 2);
+        const std::size_t workerCount = std::min<std::size_t>(jobs.size(), desiredWorkers);
+
+        std::vector<std::future<void>> workers;
+        workers.reserve(workerCount);
+
+        for (std::size_t worker = 0; worker < workerCount; ++worker) {
+            workers.push_back(std::async(std::launch::async, [&]() {
+                while (true) {
+                    const std::size_t index = nextIndex.fetch_add(1);
+                    if (index >= jobs.size()) {
+                        break;
+                    }
+
+                    const ConvertJob &job = jobs[index];
+                    try {
+                        if (ConvertToFileType(job.inputPath, job.outputPath, format, quality)) {
+                            ++convertedCount;
+                        } else {
+                            ++failedCount;
+                        }
+                    } catch (const std::exception &e) {
+                        err(("Parallel conversion failed for " + job.inputPath.string() + ": " + e.what()).c_str());
+                        ++failedCount;
+                    } catch (...) {
+                        err(("Parallel conversion failed for " + job.inputPath.string() + ": unknown exception").c_str());
+                        ++failedCount;
+                    }
+                }
+            }));
+        }
+
+        for (auto &worker : workers) {
+            worker.get();
+        }
+
+        yay(("Parallel directory conversion completed. Converted " + std::to_string(convertedCount.load()) +
+             " file(s).")
+                .c_str());
+        if (skippedCount > 0) {
+            warn(("Skipped " + std::to_string(skippedCount) + " file(s).").c_str());
+        }
+        if (failedCount.load() > 0) {
+            warn(("Failed to convert " + std::to_string(failedCount.load()) + " file(s).").c_str());
+        }
+
+        return convertedCount.load() > 0;
+    }
 } // namespace bitfake::nonuser
 
 namespace bitfake::replaygain {

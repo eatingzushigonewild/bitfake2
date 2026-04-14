@@ -173,6 +173,13 @@ int main(int argc, char *argv[]) {
                 return EXIT_SUCCESS;
             }
 
+            if (strcmp(argv[i], "--parallel") == 0 || strcmp(argv[i], "-p") == 0) {
+                plog("Parallel conversion enabled for supported functions.");
+                gb::Parallel = true;
+            }
+
+            // if (strcmp(argv[i], "--recursive") == 0 || strcmp(argv[i], "-r") == 0); <- future thing
+
             // This first pass is only for grabbing input and output files, so we can apply it to other commands later!
             break;
         }
@@ -367,6 +374,7 @@ int main(int argc, char *argv[]) {
             if (fs::is_directory(gb::inputFile)) {
                 yay("trying to convert directory >:P...");
                 fs::directory_iterator dirIter(gb::inputFile);
+                std::vector<fs::path> inputAudioFiles;
 
                 for (const auto &entry : dirIter) {
                     if (!entry.is_regular_file()) {
@@ -379,13 +387,28 @@ int main(int argc, char *argv[]) {
                         continue;
                     }
 
-                    try {
-                        bitfake::nonuser::ConvertToFileType(entry.path(), gb::conversionOutputDirectory,
-                                                            gb::outputFormat, gb::VBRQuality);
-                    } catch (const std::exception &e) {
-                        err((std::string("Failed to convert file: ") + entry.path().string() + " Error: " + e.what())
-                                .c_str());
+                    inputAudioFiles.push_back(entry.path());
+                }
+
+                if (inputAudioFiles.empty()) {
+                    warn("No valid audio files found in input directory for conversion.");
+                    continue;
+                }
+
+                try {
+                    if (gb::Parallel) {
+                        bitfake::nonuser::ParallelConvertToFileType(inputAudioFiles, gb::conversionOutputDirectory,
+                                                                     gb::outputFormat, gb::VBRQuality);
+                    } else {
+                        for (const auto &inputPath : inputAudioFiles) {
+                            bitfake::nonuser::ConvertToFileType(inputPath, gb::conversionOutputDirectory,
+                                                                gb::outputFormat, gb::VBRQuality);
+                        }
                     }
+                } catch (const std::exception &e) {
+                    err((std::string("Failed to convert directory: ") + gb::inputFile.string() + " Error: " +
+                         e.what())
+                            .c_str());
                 }
             } else {
                 yay("Trying to convert single file >:P...");

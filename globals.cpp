@@ -10,4 +10,5 @@ bool outputToTerminal = true;
 std::string version = "2.0";
 fs::path conversionOutputDirectory;
 std::string tag, val;
+bool Parallel = false;
 } // namespace globals
