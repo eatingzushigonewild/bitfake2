@@ -1,6 +1,8 @@
 CXX      ?= g++
 CXXFLAGS += -std=c++17 -Wall -Wextra -I./Utilities -Wno-deprecated-declarations
 LDFLAGS  += -ltag -lfftw3 -lebur128 -lsndfile -lavformat -lavcodec -lswresample -lavutil -lcurl
+PKG_CONFIG ?= pkg-config
+REQUIRED_PKGS := taglib fftw3 libebur128 sndfile libavformat libavcodec libswresample libavutil libcurl
 
 BUILD_DIR := build
 DESTDIR   ?= 
@@ -22,9 +24,20 @@ endif
 
 BIN := bitf$(EXE)
 
-.PHONY: all clean format check-format install
+.PHONY: all clean format check-format install check-deps
 
-all: $(BIN) bundle
+all: check-deps $(BIN) bundle
+
+check-deps:
+ifeq ($(WINDOWS),1)
+	@echo "Skipping dependency checks on MinGW (pkg-config package names may differ)."
+else
+	@command -v $(PKG_CONFIG) >/dev/null 2>&1 || { echo "Missing dependency tool: $(PKG_CONFIG)"; exit 1; }
+	@for p in $(REQUIRED_PKGS); do \
+		$(PKG_CONFIG) --exists $$p; echo "Found dependency: $$p" || { echo "Missing dependency: $$p"; exit 1; }; \
+	done
+	@echo "All build dependencies found."
+endif
 
 $(BIN): $(OBJ)
 	$(CXX) $(CXXFLAGS) $(OBJ) -o $@ $(LDFLAGS)

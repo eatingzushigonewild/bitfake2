@@ -18,5 +18,6 @@ extern std::string version;
 extern fs::path conversionOutputDirectory; // For storing converted files if -po/--pathout is specified
 extern std::string tag, val;
 extern bool Parallel;
+extern bool musicbrainzConfirm;
 } // namespace globals
 #endif

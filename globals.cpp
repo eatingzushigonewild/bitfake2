@@ -11,4 +11,5 @@ std::string version = "2.0";
 fs::path conversionOutputDirectory;
 std::string tag, val;
 bool Parallel = false;
+bool musicbrainzConfirm = true;
 } // namespace globals

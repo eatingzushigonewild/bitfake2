@@ -53,6 +53,7 @@ Build-time dependencies:
 * FFTW3 development headers and library
 * libebur128 development headers and library
 * libsndfile development headers and library
+* libcurl development headers and library
 * FFmpeg development libraries (`libavformat`, `libavcodec`, `libavutil`, `libswresample`)
 
 Run-time dependencies:
@@ -63,27 +64,27 @@ Run-time dependencies:
 
 Ubuntu/Debian-based distributions:
 ```sh
-sudo apt update && sudo apt install -y build-essential libtag1-dev libfftw3-dev libebur128-dev libsndfile1-dev libavformat-dev libavcodec-dev libavutil-dev libswresample-dev
+sudo apt update && sudo apt install -y build-essential libtag1-dev libfftw3-dev libebur128-dev libsndfile1-dev libavformat-dev libavcodec-dev libavutil-dev libswresample-dev libcurl4-openssl-dev
 ```
 
 Fedora/Fedora-based distributions:
 ```sh
-sudo dnf install -y gcc-c++ make taglib-devel fftw-devel ebur128-devel libsndfile-devel ffmpeg-devel
+sudo dnf install -y gcc-c++ make taglib-devel fftw-devel ebur128-devel libsndfile-devel ffmpeg-devel libcurl-devel
 ```
 
 RHEL:
 ```sh
-sudo dnf install -y epel-release dnf-plugins-core && sudo dnf install -y https://download1.rpmfusion.org/free/el/rpmfusion-free-release-$(rpm -E %rhel).noarch.rpm && sudo dnf config-manager --set-enabled crb && sudo dnf install -y gcc-c++ make taglib-devel fftw-devel ebur128-devel libsndfile-devel ffmpeg-devel
+sudo dnf install -y epel-release dnf-plugins-core && sudo dnf install -y https://download1.rpmfusion.org/free/el/rpmfusion-free-release-$(rpm -E %rhel).noarch.rpm && sudo dnf config-manager --set-enabled crb && sudo dnf install -y gcc-c++ make taglib-devel fftw-devel ebur128-devel libsndfile-devel ffmpeg-devel libcurl-devel
 ```
 
 Arch/Arch-based distributions:
 ```sh
-sudo pacman -Syu --needed base-devel taglib fftw libebur128 libsndfile ffmpeg
+sudo pacman -Syu --needed base-devel taglib fftw libebur128 libsndfile ffmpeg curl
 ```
 
 Gentoo:
 ```sh
-sudo emerge --ask sys-devel/gcc sys-devel/make media-libs/taglib sci-libs/fftw media-libs/libebur128 media-libs/libsndfile media-video/ffmpeg
+sudo emerge --ask sys-devel/gcc sys-devel/make media-libs/taglib sci-libs/fftw media-libs/libebur128 media-libs/libsndfile media-video/ffmpeg net-misc/curl
 ```
 
 Gentoo USE flag note (for encoder support):
@@ -99,7 +100,7 @@ sudo emerge --ask app-misc/bitfake2
 
 Alpine:
 ```sh
-sudo apk add --no-cache build-base taglib-dev fftw-dev ebur128-dev libsndfile-dev ffmpeg-dev
+sudo apk add --no-cache build-base taglib-dev fftw-dev ebur128-dev libsndfile-dev ffmpeg-dev curl-dev
 ```
 
 Windows (MSYS2/MinGW):
@@ -171,7 +172,7 @@ git clone https://github.com/Ray17x/bitfake2
 > [!WARNING]
 > `ebur128` conflicts with `libebur128`, make sure to install `libebur128`.
 ```sh
-sudo pkg install taglib fftw3 libebur128 libsndfile ffmpeg
+sudo pkg install taglib fftw3 libebur128 libsndfile ffmpeg curl
 ```
 Once you have installed the deps:
 ```sh
@@ -188,7 +189,7 @@ Clone the bitfake2 repo:
 git clone https://github.com/Ray17x/bitfake2
 ```
 ```sh
-sudo pkg install taglib fftw3 libebur128 libsndfile ffmpeg
+sudo pkg install taglib fftw3 libebur128 libsndfile ffmpeg curl
 ```
 ```sh
 bmake 
@@ -204,7 +205,7 @@ git clone https://github.com/Ray17x/bitfake2
 
 Install the dependencies:
 ```sh
-sudo pkgin install taglib fftw3 libebur128 libsndfile ffmpeg7
+sudo pkgin install taglib fftw3 libebur128 libsndfile ffmpeg7 curl
 ```
 Compile and install:
 ```sh
@@ -221,7 +222,7 @@ git clone https://github.com/Ray17x/bitfake2
 
 Install the dependencies:
 ```sh
-pkg_add taglib fftw3 libebur128 libsndfile ffmpeg
+pkg_add taglib fftw3 libebur128 libsndfile ffmpeg curl
 ```
 Compile and install:
 ```sh
