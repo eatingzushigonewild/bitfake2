@@ -230,7 +230,7 @@ void RenameFilesFromTags(const fs::path &rootDir);
 namespace musicbrainz {
 type::MBRequestData PrepareMBRequestData(const fs::path &inputPath);
 std::string GetMBXML(const type::MBRequestData &reqData);
-type::MusicBrainzXMLData ParseMBXML(const std::string &xmlStr);
+type::MusicBrainzXMLData ParseMBXML(const std::string &xmlStr, const type::MBRequestData &reqData);
 void WriteMetaFromMBXML(const fs::path &inputPath, const type::MusicBrainzXMLData &mbData);
 } // namespace musicbrainz
 } // namespace bitfake

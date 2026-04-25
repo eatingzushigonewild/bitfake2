@@ -6,6 +6,7 @@ using namespace ConsoleOut;
 #include <future>
 #include <thread>
 #include <atomic>
+#include <iostream>
 namespace fs = std::filesystem;
 #include "Utilities/filechecks.hpp"
 namespace fc = FileChecks;
@@ -63,6 +64,7 @@ int main(int argc, char *argv[]) {
                 printf("  -sg,   --spectrogram <output.png>        Generate spectrogram image from input audio file\n");
                 printf(
                     "  -mb,   --musicbrainz                     Fetch metadata from MusicBrainz and write to file\n");
+                printf("  -mbnc, --musicbrainz-no-confirm          Bypass confirmation and write MusicBrainz metadata immediately\n");
                 printf("  -v,    --version                         Show program version\n");
                 return EXIT_SUCCESS;
             }
@@ -176,6 +178,17 @@ int main(int argc, char *argv[]) {
             if (strcmp(argv[i], "--parallel") == 0 || strcmp(argv[i], "-p") == 0) {
                 plog("Parallel conversion enabled for supported functions.");
                 gb::Parallel = true;
+            }
+
+            if (strcmp(argv[i], "-mbnc") == 0 || strcmp(argv[i], "--musicbrainz-no-confirm") == 0 ||
+                strcmp(argv[i], "--mb-no-confirm") == 0 || strcmp(argv[i], "-mbc") == 0) {
+                plog("MusicBrainz confirmation prompt bypassed.");
+                gb::musicbrainzConfirm = false;
+            }
+
+            if (strcmp(argv[i], "--musicbrainz-confirm") == 0 || strcmp(argv[i], "--mb-confirm") == 0) {
+                plog("MusicBrainz confirmation prompt enabled.");
+                gb::musicbrainzConfirm = true;
             }
 
             // if (strcmp(argv[i], "--recursive") == 0 || strcmp(argv[i], "-r") == 0); <- future thing
@@ -590,10 +603,47 @@ int main(int argc, char *argv[]) {
                 return EXIT_FAILURE;
             }
 
-            bitfake::type::MusicBrainzXMLData mbData = bitfake::musicbrainz::ParseMBXML(xmlStr);
+            bitfake::type::MusicBrainzXMLData mbData = bitfake::musicbrainz::ParseMBXML(xmlStr, reqData);
             if (mbData.MUSICBRAINZ_TRACKID.empty() && mbData.recordingTitle.empty() && mbData.artistName.empty()) {
                 err("MusicBrainz response did not include usable recording metadata; metadata was not written.");
                 return EXIT_FAILURE;
+            }
+
+            if (gb::musicbrainzConfirm) {
+                std::string genreList = "(none returned)";
+                if (!mbData.genres.empty()) {
+                    genreList.clear();
+                    for (const std::string &genre : mbData.genres) {
+                        if (!genreList.empty()) {
+                            genreList += "; ";
+                        }
+                        genreList += genre;
+                    }
+                }
+
+                printf("MusicBrainz candidate metadata:\n");
+                printf("  Title: %s\n", mbData.recordingTitle.empty() ? "(empty)" : mbData.recordingTitle.c_str());
+                printf("  Artist: %s\n", mbData.artistName.empty() ? "(empty)" : mbData.artistName.c_str());
+                printf("  Album: %s\n", mbData.releaseTitle.empty() ? "(empty)" : mbData.releaseTitle.c_str());
+                printf("  Date: %s\n", mbData.releaseDate.empty() ? "(empty)" : mbData.releaseDate.c_str());
+                printf("  Track Number: %d\n", mbData.trackNumber);
+                printf("  Genres: %s\n", genreList.c_str());
+                printf("  MB Track ID: %s\n", mbData.MUSICBRAINZ_TRACKID.empty() ? "(empty)" : mbData.MUSICBRAINZ_TRACKID.c_str());
+                printf("  MB Artist ID: %s\n", mbData.MUSICBRAINZ_ARTISTID.empty() ? "(empty)" : mbData.MUSICBRAINZ_ARTISTID.c_str());
+                printf("  MB Album ID: %s\n", mbData.MUSICBRAINZ_ALBUMID.empty() ? "(empty)" : mbData.MUSICBRAINZ_ALBUMID.c_str());
+                printf("Write this metadata to file? [y/N]: ");
+
+                std::string answer;
+                if (!std::getline(std::cin, answer)) {
+                    err("Failed to read confirmation input; metadata was not written.");
+                    return EXIT_FAILURE;
+                }
+
+                const bool approved = !answer.empty() && (answer == "y" || answer == "Y" || answer == "yes" || answer == "YES");
+                if (!approved) {
+                    warn("MusicBrainz metadata write canceled by user.");
+                    continue;
+                }
             }
 
             bitfake::musicbrainz::WriteMetaFromMBXML(gb::inputFile, mbData);

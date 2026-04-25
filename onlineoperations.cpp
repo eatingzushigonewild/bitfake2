@@ -19,6 +19,9 @@ namespace gb = globals;
 #include <vector>
 #include <limits>
 #include <climits>
+#include <string>
+#include <chrono>
+#include <thread>
 
 #include "Utilities/pugixml.hpp"
 
@@ -226,6 +229,41 @@ std::string GetMBXML(const bitfake::type::MBRequestData &reqData) {
 
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L); // 30 second timeout for slow internets
 
+    // Escape special query syntax characters so tag text is treated as literal terms.
+    auto escapeSearchValue = [](const std::string &value) -> std::string {
+        std::string escaped;
+        escaped.reserve(value.size() * 2);
+        for (char c : value) {
+            switch (c) {
+                case '\\':
+                case '+':
+                case '-':
+                case '!':
+                case '(':
+                case ')':
+                case '{':
+                case '}':
+                case '[':
+                case ']':
+                case '^':
+                case '"':
+                case '~':
+                case '*':
+                case '?':
+                case ':':
+                case '/':
+                case '|':
+                case '&':
+                    escaped.push_back('\\');
+                    break;
+                default:
+                    break;
+            }
+            escaped.push_back(c);
+        }
+        return escaped;
+    };
+
     auto executeSearchExpr = [&](const std::string &searchExpr, std::string &responseXml) -> bool {
         char *encodedExpr = curl_easy_escape(curl, searchExpr.c_str(), static_cast<int>(searchExpr.size()));
         if (encodedExpr == nullptr) {
@@ -234,19 +272,53 @@ std::string GetMBXML(const bitfake::type::MBRequestData &reqData) {
         }
 
         const std::string MBurl = "https://musicbrainz.org/ws/2/recording?query=" + std::string(encodedExpr) +
-                      "&fmt=xml&limit=10&inc=artist-credits+releases+media+recordings+tags+genres";
+                                  "&fmt=xml&limit=10&inc=artist-credits+releases+media+recordings+tags+genres";
         curl_free(encodedExpr);
 
-        responseXml.clear();
-        curl_easy_setopt(curl, CURLOPT_URL, MBurl.c_str());
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseXml);
-        CURLcode res = curl_easy_perform(curl);
-        if (res != CURLE_OK) {
-            err(("MusicBrainz metadata request failed: " + std::string(curl_easy_strerror(res))).c_str());
-            return false;
+        auto isRetryableCurlError = [](CURLcode code) -> bool {
+            return code == CURLE_OPERATION_TIMEDOUT || code == CURLE_COULDNT_RESOLVE_HOST ||
+                   code == CURLE_COULDNT_CONNECT || code == CURLE_RECV_ERROR || code == CURLE_SEND_ERROR;
+        };
+
+        const int maxAttempts = 3;
+        for (int attempt = 1; attempt <= maxAttempts; ++attempt) {
+            responseXml.clear();
+            curl_easy_setopt(curl, CURLOPT_URL, MBurl.c_str());
+            curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseXml);
+
+            const CURLcode res = curl_easy_perform(curl);
+            if (res != CURLE_OK) {
+                if (attempt < maxAttempts && isRetryableCurlError(res)) {
+                    warn(("MusicBrainz request transient network error; retrying (attempt " + std::to_string(attempt + 1) +
+                          "/" + std::to_string(maxAttempts) + ").")
+                             .c_str());
+                    std::this_thread::sleep_for(std::chrono::milliseconds(500L * (1L << (attempt - 1))));
+                    continue;
+                }
+                err(("MusicBrainz metadata request failed: " + std::string(curl_easy_strerror(res))).c_str());
+                return false;
+            }
+
+            long httpCode = 0;
+            curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
+            const bool retryableHttp = (httpCode == 429) || (httpCode >= 500 && httpCode <= 599);
+            if (retryableHttp && attempt < maxAttempts) {
+                warn(("MusicBrainz request throttled/server error (HTTP " + std::to_string(httpCode) +
+                      "); retrying (attempt " + std::to_string(attempt + 1) + "/" + std::to_string(maxAttempts) + ").")
+                         .c_str());
+                std::this_thread::sleep_for(std::chrono::milliseconds(500L * (1L << (attempt - 1))));
+                continue;
+            }
+
+            if (httpCode >= 400) {
+                err(("MusicBrainz metadata request failed with HTTP status " + std::to_string(httpCode) + ".").c_str());
+                return false;
+            }
+
+            return true;
         }
 
-        return true;
+        return false;
     };
 
     auto hasAnyRecordingResults = [](const std::string &xml) -> bool {
@@ -284,16 +356,19 @@ std::string GetMBXML(const bitfake::type::MBRequestData &reqData) {
     // determine what query is best based on what data is available.
     std::string primarySearchExpr;
     std::string fallbackSearchExpr;
+    const std::string escapedTitle = escapeSearchValue(reqData.title);
+    const std::string escapedArtist = escapeSearchValue(reqData.artist);
+    const std::string escapedAlbum = escapeSearchValue(reqData.album);
     if (!reqData.title.empty() && !reqData.artist.empty() && !reqData.album.empty()) {
-        primarySearchExpr = "recording:\"" + reqData.title + "\" AND artist:\"" + reqData.artist +
-                            "\" AND release:\"" + reqData.album + "\"";
-        fallbackSearchExpr = "recording:\"" + reqData.title + "\" AND artist:\"" + reqData.artist + "\"";
+        primarySearchExpr = "recording:\"" + escapedTitle + "\" AND artist:\"" + escapedArtist +
+                            "\" AND release:\"" + escapedAlbum + "\"";
+        fallbackSearchExpr = "recording:\"" + escapedTitle + "\" AND artist:\"" + escapedArtist + "\"";
     } else if (!reqData.title.empty() && !reqData.artist.empty()) {
-        primarySearchExpr = "recording:\"" + reqData.title + "\" AND artist:\"" + reqData.artist + "\"";
+        primarySearchExpr = "recording:\"" + escapedTitle + "\" AND artist:\"" + escapedArtist + "\"";
     } else if (!reqData.album.empty() && !reqData.artist.empty()) {
-        primarySearchExpr = "release:\"" + reqData.album + "\" AND artist:\"" + reqData.artist + "\"";
+        primarySearchExpr = "release:\"" + escapedAlbum + "\" AND artist:\"" + escapedArtist + "\"";
     } else if (!reqData.title.empty()) {
-        primarySearchExpr = "recording:\"" + reqData.title + "\"";
+        primarySearchExpr = "recording:\"" + escapedTitle + "\"";
     } else {
         warn("MusicBrainz metadata request: insufficient metadata to construct query.");
         curl_easy_cleanup(curl);
@@ -318,7 +393,7 @@ std::string GetMBXML(const bitfake::type::MBRequestData &reqData) {
     return XMLresponseStr;
 }
 
-bitfake::type::MusicBrainzXMLData ParseMBXML(const std::string &xmlStr) {
+bitfake::type::MusicBrainzXMLData ParseMBXML(const std::string &xmlStr, const bitfake::type::MBRequestData &reqData) {
     bitfake::type::MusicBrainzXMLData data;
     data.trackNumber = 0;
 
@@ -349,6 +424,25 @@ bitfake::type::MusicBrainzXMLData ParseMBXML(const std::string &xmlStr) {
             localName = nodeName;
         }
         return std::strcmp(localName, name) == 0;
+    };
+
+    auto attrNameEquals = [](const pugi::xml_attribute &attr, const char *name) -> bool {
+        const char *attrName = attr.name();
+        if (attrName == nullptr || *attrName == '\0') {
+            return false;
+        }
+        const char *localName = std::strrchr(attrName, ':');
+        localName = (localName == nullptr) ? attrName : localName + 1;
+        return std::strcmp(localName, name) == 0;
+    };
+
+    auto getIntAttrByLocalName = [&](const pugi::xml_node &node, const char *name, int fallback) -> int {
+        for (const pugi::xml_attribute &attr : node.attributes()) {
+            if (attrNameEquals(attr, name)) {
+                return attr.as_int(fallback);
+            }
+        }
+        return fallback;
     };
 
     auto firstChildByName = [&](const pugi::xml_node &parent, const char *name) -> pugi::xml_node {
@@ -390,6 +484,49 @@ bitfake::type::MusicBrainzXMLData ParseMBXML(const std::string &xmlStr) {
             }
         }
         return pugi::xml_node();
+    };
+
+    auto normalizeForCompare = [&](const std::string &input) -> std::string {
+        std::string value = sanitizeText(input);
+        std::string normalized;
+        normalized.reserve(value.size());
+
+        bool prevWasSpace = true;
+        for (unsigned char ch : value) {
+            if (std::isalnum(ch) != 0) {
+                normalized.push_back(static_cast<char>(std::tolower(ch)));
+                prevWasSpace = false;
+            } else if (std::isspace(ch) != 0) {
+                if (!prevWasSpace) {
+                    normalized.push_back(' ');
+                    prevWasSpace = true;
+                }
+            }
+        }
+
+        if (!normalized.empty() && normalized.back() == ' ') {
+            normalized.pop_back();
+        }
+
+        return normalized;
+    };
+
+    auto scoreTextMatch = [&](const std::string &needleRaw, const std::string &candidateRaw, int exactScore,
+                              int containsScore) -> int {
+        const std::string needle = normalizeForCompare(needleRaw);
+        const std::string candidate = normalizeForCompare(candidateRaw);
+
+        if (needle.empty() || candidate.empty()) {
+            return 0;
+        }
+        if (needle == candidate) {
+            return exactScore;
+        }
+        if (candidate.find(needle) != std::string::npos || needle.find(candidate) != std::string::npos) {
+            return containsScore;
+        }
+
+        return 0;
     };
 
     auto datePrecisionScore = [](const std::string &dateStr) -> int {
@@ -461,7 +598,6 @@ bitfake::type::MusicBrainzXMLData ParseMBXML(const std::string &xmlStr) {
     pugi::xml_node recordingNode;
     pugi::xml_node releaseNode;
     pugi::xml_node artistNode;
-    pugi::xml_node preferredReleaseNode;
 
     for (const pugi::xml_node &metadataNode : root.children()) {
         if (!nodeNameEquals(metadataNode, "metadata")) {
@@ -469,10 +605,51 @@ bitfake::type::MusicBrainzXMLData ParseMBXML(const std::string &xmlStr) {
         }
 
         if (!recordingNode) {
-            recordingNode = firstDescendantByName(metadataNode, "recording");
-        }
-        if (!preferredReleaseNode) {
-            preferredReleaseNode = firstChildByName(metadataNode, "release");
+            int bestCompositeScore = std::numeric_limits<int>::min();
+            std::vector<pugi::xml_node> searchStack;
+            for (pugi::xml_node child = metadataNode.first_child(); child; child = child.next_sibling()) {
+                searchStack.push_back(child);
+            }
+
+            while (!searchStack.empty()) {
+                pugi::xml_node node = searchStack.back();
+                searchStack.pop_back();
+
+                if (nodeNameEquals(node, "recording")) {
+                    const int scoreAttr = getIntAttrByLocalName(node, "score", 0);
+                    const std::string candidateTitle = sanitizeText(firstChildByName(node, "title").text().as_string());
+
+                    std::string candidateArtist;
+                    const pugi::xml_node artistCreditNode = firstChildByName(node, "artist-credit");
+                    if (artistCreditNode) {
+                        candidateArtist = sanitizeText(firstDescendantByName(artistCreditNode, "name").text().as_string());
+                    }
+
+                    std::string candidateRelease;
+                    const pugi::xml_node releaseListNode = firstChildByName(node, "release-list");
+                    if (releaseListNode) {
+                        const pugi::xml_node releaseCandidateNode = firstChildByName(releaseListNode, "release");
+                        if (releaseCandidateNode) {
+                            candidateRelease =
+                                sanitizeText(firstChildByName(releaseCandidateNode, "title").text().as_string());
+                        }
+                    }
+
+                    int compositeScore = scoreAttr * 3;
+                    compositeScore += scoreTextMatch(reqData.title, candidateTitle, 220, 120);
+                    compositeScore += scoreTextMatch(reqData.artist, candidateArtist, 180, 90);
+                    compositeScore += scoreTextMatch(reqData.album, candidateRelease, 100, 45);
+
+                    if (!recordingNode || compositeScore > bestCompositeScore) {
+                        recordingNode = node;
+                        bestCompositeScore = compositeScore;
+                    }
+                }
+
+                for (pugi::xml_node child = node.first_child(); child; child = child.next_sibling()) {
+                    searchStack.push_back(child);
+                }
+            }
         }
         if (!releaseNode) {
             releaseNode = firstDescendantByName(metadataNode, "release");
@@ -480,10 +657,6 @@ bitfake::type::MusicBrainzXMLData ParseMBXML(const std::string &xmlStr) {
         if (!artistNode) {
             artistNode = firstDescendantByName(metadataNode, "artist");
         }
-    }
-
-    if (preferredReleaseNode) {
-        releaseNode = preferredReleaseNode;
     }
 
     if (recordingNode) {
@@ -498,10 +671,11 @@ bitfake::type::MusicBrainzXMLData ParseMBXML(const std::string &xmlStr) {
             }
         }
 
-        if (!releaseNode) {
-            const pugi::xml_node releaseListNode = firstChildByName(recordingNode, "release-list");
-            if (releaseListNode) {
-                releaseNode = firstChildByName(releaseListNode, "release");
+        const pugi::xml_node releaseListNode = firstChildByName(recordingNode, "release-list");
+        if (releaseListNode) {
+            const pugi::xml_node recordingReleaseNode = firstChildByName(releaseListNode, "release");
+            if (recordingReleaseNode) {
+                releaseNode = recordingReleaseNode;
             }
         }
 
@@ -596,7 +770,10 @@ bitfake::type::MusicBrainzXMLData ParseMBXML(const std::string &xmlStr) {
                     }
 
                     if (bestTitleMatchedPosition == 0) {
-                        const std::string trackTitle = sanitizeText(firstChildByName(trackNode, "title").text().as_string());
+                        std::string trackTitle = sanitizeText(firstChildByName(trackRecordingNode, "title").text().as_string());
+                        if (trackTitle.empty()) {
+                            trackTitle = sanitizeText(firstChildByName(trackNode, "title").text().as_string());
+                        }
                         if (!recordingTitleLower.empty() && !trackTitle.empty() &&
                             toLower(trackTitle) == recordingTitleLower && position > 0) {
                             bestTitleMatchedPosition = position;
@@ -637,36 +814,53 @@ bitfake::type::MusicBrainzXMLData ParseMBXML(const std::string &xmlStr) {
                 continue;
             }
 
+            std::string genre;
             const pugi::xml_node nameNode = firstChildByName(entryNode, "name");
-            if (!nameNode) {
-                continue;
+            if (nameNode) {
+                genre = sanitizeText(nameNode.text().as_string());
+            } else {
+                // Some MusicBrainz responses encode genre text directly on the node.
+                genre = sanitizeText(entryNode.text().as_string());
             }
 
-            std::string genre = sanitizeText(nameNode.text().as_string());
             if (!genre.empty() && seenGenres.insert(genre).second) {
                 data.genres.push_back(genre);
             }
         }
     };
 
-    std::vector<pugi::xml_node> genreStack;
-    for (pugi::xml_node child = root.first_child(); child; child = child.next_sibling()) {
-        genreStack.push_back(child);
-    }
-
-    while (!genreStack.empty()) {
-        pugi::xml_node node = genreStack.back();
-        genreStack.pop_back();
-
-        if (nodeNameEquals(node, "tag-list")) {
-            appendGenresFromListNode(node, "tag");
-        } else if (nodeNameEquals(node, "genre-list")) {
-            appendGenresFromListNode(node, "genre");
+    auto collectGenresFromSubtree = [&](const pugi::xml_node &startNode) {
+        if (!startNode) {
+            return;
         }
 
-        for (pugi::xml_node child = node.first_child(); child; child = child.next_sibling()) {
-            genreStack.push_back(child);
+        std::vector<pugi::xml_node> stack;
+        stack.push_back(startNode);
+
+        while (!stack.empty()) {
+            const pugi::xml_node node = stack.back();
+            stack.pop_back();
+
+            if (nodeNameEquals(node, "tag-list")) {
+                appendGenresFromListNode(node, "tag");
+            } else if (nodeNameEquals(node, "genre-list")) {
+                appendGenresFromListNode(node, "genre");
+            }
+
+            for (pugi::xml_node child = node.first_child(); child; child = child.next_sibling()) {
+                stack.push_back(child);
+            }
         }
+    };
+
+    // Prefer genres from the selected entities to avoid mixing tags from other search hits.
+    collectGenresFromSubtree(recordingNode);
+    collectGenresFromSubtree(releaseNode);
+    collectGenresFromSubtree(artistNode);
+
+    // Fallback for unexpected XML shapes where selected nodes have no tag/genre lists.
+    if (data.genres.empty()) {
+        collectGenresFromSubtree(root);
     }
 
     return data;
@@ -680,23 +874,29 @@ void WriteMetaFromMBXML(const fs::path &inputPath, const bitfake::type::MusicBra
     }
 
     TagLib::PropertyMap drawer = fileRef.file()->properties();
+    std::vector<std::string> stagedKeys;
+
+    auto stageIfNotEmpty = [&](const std::string &key, const std::string &value) {
+        if (value.empty()) {
+            return;
+        }
+        bitfake::tagging::StageMetaDataChanges(drawer, key, value);
+        std::string printedKey = key;
+        std::transform(printedKey.begin(), printedKey.end(), printedKey.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+        stagedKeys.push_back(printedKey);
+    };
 
     // Basic Metadata
-    if (!mbData.recordingTitle.empty()) {
-        bitfake::tagging::StageMetaDataChanges(drawer, "Title", mbData.recordingTitle);
-    }
+    stageIfNotEmpty("Title", mbData.recordingTitle);
     if (!mbData.artistName.empty()) {
-        bitfake::tagging::StageMetaDataChanges(drawer, "Artist", mbData.artistName);
-        bitfake::tagging::StageMetaDataChanges(drawer, "Album Artist", mbData.artistName);
+        stageIfNotEmpty("Artist", mbData.artistName);
+        stageIfNotEmpty("Album Artist", mbData.artistName);
     }
-    if (!mbData.releaseTitle.empty()) {
-        bitfake::tagging::StageMetaDataChanges(drawer, "Album", mbData.releaseTitle);
-    }
-    if (!mbData.releaseDate.empty()) {
-        bitfake::tagging::StageMetaDataChanges(drawer, "Date", mbData.releaseDate);
-    }
+    stageIfNotEmpty("Album", mbData.releaseTitle);
+    stageIfNotEmpty("Date", mbData.releaseDate);
     if (mbData.trackNumber > 0) {
-        bitfake::tagging::StageMetaDataChanges(drawer, "TrackNumber", std::to_string(mbData.trackNumber));
+        stageIfNotEmpty("TrackNumber", std::to_string(mbData.trackNumber));
     }
 
     std::string genreStr;
@@ -708,22 +908,32 @@ void WriteMetaFromMBXML(const fs::path &inputPath, const bitfake::type::MusicBra
             genreStr += genre;
         }
     }
-    if (!genreStr.empty()) {
-        bitfake::tagging::StageMetaDataChanges(drawer, "Genre", genreStr);
-    }
+    stageIfNotEmpty("Genre", genreStr);
 
     // musicbrainz ids
-    if (!mbData.MUSICBRAINZ_ALBUMID.empty()) {
-        bitfake::tagging::StageMetaDataChanges(drawer, "MUSICBRAINZ_ALBUMID", mbData.MUSICBRAINZ_ALBUMID);
-    }
-    if (!mbData.MUSICBRAINZ_ARTISTID.empty()) {
-        bitfake::tagging::StageMetaDataChanges(drawer, "MUSICBRAINZ_ARTISTID", mbData.MUSICBRAINZ_ARTISTID);
-    }
-    if (!mbData.MUSICBRAINZ_TRACKID.empty()) {
-        bitfake::tagging::StageMetaDataChanges(drawer, "MUSICBRAINZ_TRACKID", mbData.MUSICBRAINZ_TRACKID);
+    stageIfNotEmpty("MUSICBRAINZ_ALBUMID", mbData.MUSICBRAINZ_ALBUMID);
+    stageIfNotEmpty("MUSICBRAINZ_ARTISTID", mbData.MUSICBRAINZ_ARTISTID);
+    stageIfNotEmpty("MUSICBRAINZ_TRACKID", mbData.MUSICBRAINZ_TRACKID);
+
+    const bool committed = bitfake::tagging::CommitMetaDataChanges(inputPath, drawer);
+    if (!committed) {
+        err("MusicBrainz metadata commit failed.");
+        return;
     }
 
-    bitfake::tagging::CommitMetaDataChanges(inputPath, drawer);
+    if (stagedKeys.empty()) {
+        warn("MusicBrainz write completed with no metadata keys staged.");
+        return;
+    }
+
+    std::string keyList;
+    for (const std::string &key : stagedKeys) {
+        if (!keyList.empty()) {
+            keyList += ", ";
+        }
+        keyList += key;
+    }
+    plog(("MusicBrainz applied metadata keys: " + keyList).c_str());
 
     return;
 }
