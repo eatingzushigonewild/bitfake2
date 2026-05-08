@@ -6,11 +6,13 @@ using namespace ConsoleOut;
 #include <future>
 #include <thread>
 #include <atomic>
+#include <iostream>
 namespace fs = std::filesystem;
 #include "Utilities/filechecks.hpp"
 namespace fc = FileChecks;
 #include "Utilities/operations.hpp"
 #include "Utilities/globals.hpp"
+#include "Utilities/pathutils.hpp"
 namespace gb = globals;
 #include <taglib/fileref.h>
 #include <taglib/tpropertymap.h>
@@ -62,6 +64,8 @@ int main(int argc, char *argv[]) {
                 printf("  -sg,   --spectrogram <output.png>        Generate spectrogram image from input audio file\n");
                 printf(
                     "  -mb,   --musicbrainz                     Fetch metadata from MusicBrainz and write to file\n");
+                printf("  -mbnc, --musicbrainz-no-confirm          Bypass confirmation and write MusicBrainz metadata immediately\n");
+                printf("  -lrc,  --lrclib                          Fetch lyrics from LRCLib and write a .lrc file next to input\n");
                 printf("  -v,    --version                         Show program version\n");
                 return EXIT_SUCCESS;
             }
@@ -172,6 +176,24 @@ int main(int argc, char *argv[]) {
                 return EXIT_SUCCESS;
             }
 
+            if (strcmp(argv[i], "--parallel") == 0 || strcmp(argv[i], "-p") == 0) {
+                plog("Parallel conversion enabled for supported functions.");
+                gb::Parallel = true;
+            }
+
+            if (strcmp(argv[i], "-mbnc") == 0 || strcmp(argv[i], "--musicbrainz-no-confirm") == 0 ||
+                strcmp(argv[i], "--mb-no-confirm") == 0 || strcmp(argv[i], "-mbc") == 0) {
+                plog("MusicBrainz confirmation prompt bypassed.");
+                gb::musicbrainzConfirm = false;
+            }
+
+            if (strcmp(argv[i], "--musicbrainz-confirm") == 0 || strcmp(argv[i], "--mb-confirm") == 0) {
+                plog("MusicBrainz confirmation prompt enabled.");
+                gb::musicbrainzConfirm = true;
+            }
+
+            // if (strcmp(argv[i], "--recursive") == 0 || strcmp(argv[i], "-r") == 0); <- future thing
+
             // This first pass is only for grabbing input and output files, so we can apply it to other commands later!
             break;
         }
@@ -221,7 +243,7 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     } else {
         plog("Output file will be created/written to: ");
-        yay(gb::outputFile.c_str());
+        yay(bitfake::pathutils::pathToString(gb::outputFile).c_str());
         gb::outputToTerminal = false;
     }
 
@@ -366,6 +388,7 @@ int main(int argc, char *argv[]) {
             if (fs::is_directory(gb::inputFile)) {
                 yay("trying to convert directory >:P...");
                 fs::directory_iterator dirIter(gb::inputFile);
+                std::vector<fs::path> inputAudioFiles;
 
                 for (const auto &entry : dirIter) {
                     if (!entry.is_regular_file()) {
@@ -378,13 +401,28 @@ int main(int argc, char *argv[]) {
                         continue;
                     }
 
-                    try {
-                        bitfake::nonuser::ConvertToFileType(entry.path(), gb::conversionOutputDirectory,
-                                                            gb::outputFormat, gb::VBRQuality);
-                    } catch (const std::exception &e) {
-                        err((std::string("Failed to convert file: ") + entry.path().string() + " Error: " + e.what())
-                                .c_str());
+                    inputAudioFiles.push_back(entry.path());
+                }
+
+                if (inputAudioFiles.empty()) {
+                    warn("No valid audio files found in input directory for conversion.");
+                    continue;
+                }
+
+                try {
+                    if (gb::Parallel) {
+                        bitfake::nonuser::ParallelConvertToFileType(inputAudioFiles, gb::conversionOutputDirectory,
+                                                                     gb::outputFormat, gb::VBRQuality);
+                    } else {
+                        for (const auto &inputPath : inputAudioFiles) {
+                            bitfake::nonuser::ConvertToFileType(inputPath, gb::conversionOutputDirectory,
+                                                                gb::outputFormat, gb::VBRQuality);
+                        }
                     }
+                } catch (const std::exception &e) {
+                    err((std::string("Failed to convert directory: ") + gb::inputFile.string() + " Error: " +
+                         e.what())
+                            .c_str());
                 }
             } else {
                 yay("Trying to convert single file >:P...");
@@ -553,9 +591,9 @@ int main(int argc, char *argv[]) {
                 return EXIT_FAILURE;
             }
 
-            bitfake::type::MBRequestData reqData = bitfake::musicbrainz::PrepareMBRequestData(gb::inputFile);
+            bitfake::type::MBRequestData reqData = bitfake::online::PrepareMBRequestData(gb::inputFile);
 
-            std::string xmlStr = bitfake::musicbrainz::GetMBXML(reqData);
+            std::string xmlStr = bitfake::online::GetMBXML(reqData);
             if (xmlStr.empty()) {
                 err("MusicBrainz metadata fetch returned no data; metadata was not written.");
                 return EXIT_FAILURE;
@@ -566,14 +604,94 @@ int main(int argc, char *argv[]) {
                 return EXIT_FAILURE;
             }
 
-            bitfake::type::MusicBrainzXMLData mbData = bitfake::musicbrainz::ParseMBXML(xmlStr);
+            bitfake::type::MusicBrainzXMLData mbData = bitfake::online::ParseMBXML(xmlStr, reqData);
             if (mbData.MUSICBRAINZ_TRACKID.empty() && mbData.recordingTitle.empty() && mbData.artistName.empty()) {
                 err("MusicBrainz response did not include usable recording metadata; metadata was not written.");
                 return EXIT_FAILURE;
             }
 
-            bitfake::musicbrainz::WriteMetaFromMBXML(gb::inputFile, mbData);
+            if (gb::musicbrainzConfirm) {
+                std::string genreList = "(none returned)";
+                if (!mbData.genres.empty()) {
+                    genreList.clear();
+                    for (const std::string &genre : mbData.genres) {
+                        if (!genreList.empty()) {
+                            genreList += "; ";
+                        }
+                        genreList += genre;
+                    }
+                }
+
+                printf("MusicBrainz candidate metadata:\n");
+                printf("  Title: %s\n", mbData.recordingTitle.empty() ? "(empty)" : mbData.recordingTitle.c_str());
+                printf("  Artist: %s\n", mbData.artistName.empty() ? "(empty)" : mbData.artistName.c_str());
+                printf("  Album: %s\n", mbData.releaseTitle.empty() ? "(empty)" : mbData.releaseTitle.c_str());
+                printf("  Date: %s\n", mbData.releaseDate.empty() ? "(empty)" : mbData.releaseDate.c_str());
+                printf("  Track Number: %d\n", mbData.trackNumber);
+                printf("  Genres: %s\n", genreList.c_str());
+                printf("  MB Track ID: %s\n", mbData.MUSICBRAINZ_TRACKID.empty() ? "(empty)" : mbData.MUSICBRAINZ_TRACKID.c_str());
+                printf("  MB Artist ID: %s\n", mbData.MUSICBRAINZ_ARTISTID.empty() ? "(empty)" : mbData.MUSICBRAINZ_ARTISTID.c_str());
+                printf("  MB Album ID: %s\n", mbData.MUSICBRAINZ_ALBUMID.empty() ? "(empty)" : mbData.MUSICBRAINZ_ALBUMID.c_str());
+                printf("Write this metadata to file? [y/N]: ");
+
+                std::string answer;
+                if (!std::getline(std::cin, answer)) {
+                    err("Failed to read confirmation input; metadata was not written.");
+                    return EXIT_FAILURE;
+                }
+
+                const bool approved = !answer.empty() && (answer == "y" || answer == "Y" || answer == "yes" || answer == "YES");
+                if (!approved) {
+                    warn("MusicBrainz metadata write canceled by user.");
+                    continue;
+                }
+            }
+
+            bitfake::online::WriteMetaFromMBXML(gb::inputFile, mbData);
             yay("Metadata fetched from MusicBrainz and written to file successfully!");
+        }
+
+        if (strcmp(argv[j], "-lrc") == 0 || strcmp(argv[j], "--lrclib") == 0) {
+            if (fs::is_directory(gb::inputFile)) {
+                err("LRCLib lyrics fetch requires a single audio file as input! Use -i <file>");
+                return EXIT_FAILURE;
+            }
+
+            bitfake::type::LRCRequestData reqData = bitfake::online::PrepareLRCRequestData(gb::inputFile);
+            bitfake::type::LRCLibData lrcData = bitfake::online::GetLRCLibData(reqData);
+            if (lrcData.SyncLyrics.empty() && lrcData.NoSyncLyrics.empty()) {
+                err("LRCLib returned no lyrics for this file; no .lrc file was written.");
+                return EXIT_FAILURE;
+            }
+
+            const fs::path lrcOutputPath = bitfake::online::GetLRCLibOutputPath(reqData);
+            const std::string songName = reqData.title.empty() ? gb::inputFile.stem().string() : reqData.title;
+            const char *lyricsKind = lrcData.SyncLyrics.empty() ? "Plain Lyrics" : "Synced Lyrics";
+
+            printf("Found lyrics for:\n");
+            printf("  %s - %s\n", songName.c_str(), lyricsKind);
+            printf("File will be written to %s\n", lrcOutputPath.string().c_str());
+            printf("Write [y/N]: ");
+
+            std::string answer;
+            if (!std::getline(std::cin, answer)) {
+                err("Failed to read confirmation input; .lrc file was not written.");
+                return EXIT_FAILURE;
+            }
+
+            const bool approved = !answer.empty() && (answer == "y" || answer == "Y" || answer == "yes" || answer == "YES");
+            if (!approved) {
+                warn("LRCLib write canceled by user.");
+                continue;
+            }
+
+            fs::path writtenPath;
+            if (!bitfake::online::WriteLRCLibToFile(reqData, lrcData, writtenPath)) {
+                err("Failed to write .lrc file.");
+                return EXIT_FAILURE;
+            }
+
+            yay("Lyrics fetched from LRCLib and written successfully!");
         }
     }
 

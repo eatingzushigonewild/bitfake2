@@ -27,9 +27,10 @@ Bitfake2 - 2.0 is released. This update was mainly to make future development ea
 * Spectrogram generation (in .png)
 * Version info (WOW! BEST YET!)
 * MusicBrainz Syncing data.
+* Downloading lyrics from the internet (Synced Lyrics Preferred, leaves out as seperate file because that mattered for some reason) via LIBLRC ( no additonal dependencies )
 
 > [!IMPORTANT]
-> Users who would like to use the Musicbrainz sync must execersize caution, It may return inaccurate information. This is currently being investigated and it could be a possible issue with XML Parsing. Future updates will fix this issue alongside updating how data is grabbed and handled. This could be a musicbrainz issue; however, I want to clear up any possibility this issue could be from the feature.
+> MusicBrainz is fully functional and this message will be removed upon the next tagged release. It is on live versions, please feel free to report any bugs to me after checking that musicbrainz has the metadata you are looking for.
 
 ## Implemented Development Features
 These features are meant to make contributing to the project easier:
@@ -53,6 +54,7 @@ Build-time dependencies:
 * FFTW3 development headers and library
 * libebur128 development headers and library
 * libsndfile development headers and library
+* libcurl development headers and library
 * FFmpeg development libraries (`libavformat`, `libavcodec`, `libavutil`, `libswresample`)
 
 Run-time dependencies:
@@ -63,27 +65,28 @@ Run-time dependencies:
 
 Ubuntu/Debian-based distributions:
 ```sh
-sudo apt update && sudo apt install -y build-essential libtag1-dev libfftw3-dev libebur128-dev libsndfile1-dev libavformat-dev libavcodec-dev libavutil-dev libswresample-dev
+sudo apt update && sudo apt install -y build-essential libtag1-dev libfftw3-dev libebur128-dev libsndfile1-dev libavformat-dev libavcodec-dev libavutil-dev libswresample-dev libcurl4-openssl-dev
 ```
 
 Fedora/Fedora-based distributions:
 ```sh
-sudo dnf install -y gcc-c++ make taglib-devel fftw-devel ebur128-devel libsndfile-devel ffmpeg-devel
+sudo dnf install -y gcc-c++ make pkgconf-pkg-config taglib-devel fftw-devel libebur128-devel libsndfile-devel ffmpeg-free-devel libcurl-devel
 ```
+fixed
 
 RHEL:
 ```sh
-sudo dnf install -y epel-release dnf-plugins-core && sudo dnf install -y https://download1.rpmfusion.org/free/el/rpmfusion-free-release-$(rpm -E %rhel).noarch.rpm && sudo dnf config-manager --set-enabled crb && sudo dnf install -y gcc-c++ make taglib-devel fftw-devel ebur128-devel libsndfile-devel ffmpeg-devel
+sudo dnf install -y epel-release dnf-plugins-core && sudo dnf install -y https://download1.rpmfusion.org/free/el/rpmfusion-free-release-$(rpm -E %rhel).noarch.rpm && sudo dnf config-manager --set-enabled crb && sudo dnf install -y gcc-c++ make taglib-devel fftw-devel ebur128-devel libsndfile-devel ffmpeg-devel libcurl-devel
 ```
 
 Arch/Arch-based distributions:
 ```sh
-sudo pacman -Syu --needed base-devel taglib fftw libebur128 libsndfile ffmpeg
+sudo pacman -Syu --needed base-devel taglib fftw libebur128 libsndfile ffmpeg curl
 ```
 
 Gentoo:
 ```sh
-sudo emerge --ask sys-devel/gcc sys-devel/make media-libs/taglib sci-libs/fftw media-libs/libebur128 media-libs/libsndfile media-video/ffmpeg
+sudo emerge --ask sys-devel/gcc sys-devel/make media-libs/taglib sci-libs/fftw media-libs/libebur128 media-libs/libsndfile media-video/ffmpeg net-misc/curl
 ```
 
 Gentoo USE flag note (for encoder support):
@@ -99,11 +102,15 @@ sudo emerge --ask app-misc/bitfake2
 
 Alpine:
 ```sh
-sudo apk add --no-cache build-base taglib-dev fftw-dev ebur128-dev libsndfile-dev ffmpeg-dev
+sudo apk add --no-cache build-base taglib-dev fftw-dev ebur128-dev libsndfile-dev ffmpeg-dev curl-dev
 ```
 
-NixOS:
+Windows (MSYS2/MinGW):
+```sh
+pacman -Syu --needed base-devel mingw-w64-x86_64-taglib mingw-w64-x86_64-fftw mingw-w64-x86_64-libebur128 mingw-w64-x86_64-libsndfile mingw-w64-x86_64-ffmpeg mingw-w64-x86_64-toolchain mingw-w64-x86_64-curl
 
+```
+NixOS:
 Users that are using npins:
 ```sh
 npins add github Ray17x bitfake2 --branch main
@@ -167,7 +174,7 @@ git clone https://github.com/Ray17x/bitfake2
 > [!WARNING]
 > `ebur128` conflicts with `libebur128`, make sure to install `libebur128`.
 ```sh
-sudo pkg install taglib fftw3 libebur128 libsndfile ffmpeg
+sudo pkg install taglib fftw3 libebur128 libsndfile ffmpeg curl
 ```
 Once you have installed the deps:
 ```sh
@@ -184,7 +191,7 @@ Clone the bitfake2 repo:
 git clone https://github.com/Ray17x/bitfake2
 ```
 ```sh
-sudo pkg install taglib fftw3 libebur128 libsndfile ffmpeg
+sudo pkg install taglib fftw3 libebur128 libsndfile ffmpeg curl
 ```
 ```sh
 bmake 
@@ -200,7 +207,7 @@ git clone https://github.com/Ray17x/bitfake2
 
 Install the dependencies:
 ```sh
-sudo pkgin install taglib fftw3 libebur128 libsndfile ffmpeg7
+sudo pkgin install taglib fftw3 libebur128 libsndfile ffmpeg7 curl
 ```
 Compile and install:
 ```sh
@@ -217,7 +224,7 @@ git clone https://github.com/Ray17x/bitfake2
 
 Install the dependencies:
 ```sh
-pkg_add taglib fftw3 libebur128 libsndfile ffmpeg
+pkg_add taglib fftw3 libebur128 libsndfile ffmpeg curl
 ```
 Compile and install:
 ```sh
@@ -227,7 +234,7 @@ bmake install
 
 Overall dependency list (for other distros):
 ```
-build-base taglib-dev fftw-dev ebur128-dev libsndfile-dev libavformat libavcodec libavutil libswresample
+build-base taglib-dev fftw-dev ebur128-dev libsndfile-dev libavformat libavcodec libavutil libswresample curl-dev
 ```
 
 2. Clone the project and compile

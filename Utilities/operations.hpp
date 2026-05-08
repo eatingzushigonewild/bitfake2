@@ -168,6 +168,21 @@ struct MBRequestData {
     int trackNumber;
 };
 
+struct LRCRequestData {
+    fs::path inputPath;
+    std::string artist;
+    std::string title;
+    std::string album;
+    int trackNumber;
+};
+
+struct LRCLibData {
+    LRCRequestData requestData;
+    std::string NoSyncLyrics;
+    std::string SyncLyrics;
+    std::string Sourcelink;
+};
+
 inline const std::map<AudioFormat, std::string> ConversionLibMap = {
     {AudioFormat::MP3, "libmp3lame"},    {AudioFormat::OGG, "libvorbis"}, {AudioFormat::FLAC, "flac"},
     {AudioFormat::AAC, "libfdk-aac"},    {AudioFormat::OPUS, "libopus"},  {AudioFormat::WAV, "pcm_s16le"},
@@ -179,6 +194,8 @@ type::AudioFormat StringToAudioFormat(const std::string &str);
 type::VBRQualities StringToVBRQuality(const std::string &str);
 bool ConvertToFileType(const fs::path &inputPath, const fs::path &outputPath, type::AudioFormat format,
                        type::VBRQualities quality);
+bool ParallelConvertToFileType(const std::vector<fs::path> &inputPaths, const fs::path &outputDir, type::AudioFormat format,
+                           type::VBRQualities quality);
 } // namespace nonuser
 
 namespace tagging {
@@ -225,11 +242,23 @@ void OrganizeAlbumsIntoArtists(const fs::path &rootDir);
 void RenameFilesFromTags(const fs::path &rootDir);
 } // namespace sort
 
-namespace musicbrainz {
+namespace online {
+
+// musicbrainz
 type::MBRequestData PrepareMBRequestData(const fs::path &inputPath);
 std::string GetMBXML(const type::MBRequestData &reqData);
-type::MusicBrainzXMLData ParseMBXML(const std::string &xmlStr);
+type::MusicBrainzXMLData ParseMBXML(const std::string &xmlStr, const type::MBRequestData &reqData);
 void WriteMetaFromMBXML(const fs::path &inputPath, const type::MusicBrainzXMLData &mbData);
-} // namespace musicbrainz
+
+// lrclib
+
+type::LRCRequestData PrepareLRCRequestData(const fs::path &inputPath);
+type::LRCLibData GetLRCLibData(const type::LRCRequestData &reqData);
+type::LRCLibData ParseLRCLibData(const std::string &responseStr, const type::LRCRequestData &reqData);
+fs::path GetLRCLibOutputPath(const type::LRCRequestData &reqData);
+bool WriteLRCLibToFile(const type::LRCRequestData &reqData, const type::LRCLibData &lrcData, fs::path &writtenPath);
+
+
+} // namespace online
 } // namespace bitfake
 #endif // OPERATIONS_HPP
